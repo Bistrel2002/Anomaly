@@ -1,0 +1,30 @@
+# API & Web Framework
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+
+# Data Processing & Machine Learning
+pandas
+numpy
+scikit-learn
+scipy
+imbalanced-learn
+
+# Visualization
+matplotlib
+seaborn
+
+# Database & ORM (PostgreSQL)
+SQLAlchemy
+psycopg2-binary
+
+# Monitoring & MLOps
+prometheus-client
+prometheus-fastapi-instrumentator
+
+# Model Serialization
+joblib
+
+# Data Drift & Validation (Optional but recommended for Step 7)
+evidently
