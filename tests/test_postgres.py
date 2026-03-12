@@ -52,7 +52,7 @@ def run_test():
     print("\nVérification dans la base de données...")
     time.sleep(1) # Attendre un peu que la base soit bien mise à jour
 
-    DATABASE_URL = "postgresql://anomaly_user:anomaly_password@localhost:5432/anomaly_db"
+    DATABASE_URL = "postgresql://anomaly_user:anomaly_password@127.0.0.1:5433/anomaly_db"
     try:
         engine = create_engine(DATABASE_URL)
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

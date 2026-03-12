@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 # Par défaut, on pointe vers notre base locale via Docker Compose
 DATABASE_URL = os.getenv(
     "DATABASE_URL", 
-    "postgresql://anomaly_user:anomaly_password@localhost:5432/anomaly_db"
+    "postgresql://anomaly_user:anomaly_password@127.0.0.1:5433/anomaly_db"
 )
 
 # Création de l'engine SQLAlchemy
