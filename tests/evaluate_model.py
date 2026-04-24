@@ -106,7 +106,7 @@ def run_phase1(model, scaler) -> pd.DataFrame:
     return df
 
 
-def run_phase2(df: pd.DataFrame):
+def run_phase2(df: pd.DataFrame) -> None:
     print("\n" + "=" * 60)
     print("PHASE 2 - API TEST")
     print("=" * 60)
@@ -167,7 +167,7 @@ def run_phase2(df: pd.DataFrame):
     print(f"Average latency            : {avg_lat_ms:.1f}ms")
 
 
-def main():
+def main() -> None:
     print("=" * 60)
     print("FRAUD DETECTION MODEL — FULL EVALUATION")
     print("=" * 60)
