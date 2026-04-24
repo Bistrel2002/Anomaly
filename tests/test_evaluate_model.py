@@ -58,10 +58,10 @@ def test_save_outputs_creates_files():
     with tempfile.TemporaryDirectory() as tmpdir:
         with patch("tests.evaluate_model.OUTPUT_DIR", tmpdir):
             _save_outputs(df, y_true, y_pred, y_prob, cm, auc)
-        files = os.listdir(tmpdir)
-        assert "report.csv" in files
-        assert "confusion_matrix.png" in files
-        assert "roc_curve.png" in files
+            files = os.listdir(tmpdir)
+            assert "report.csv" in files
+            assert "confusion_matrix.png" in files
+            assert "roc_curve.png" in files
 
 
 def test_save_outputs_csv_columns():
@@ -78,4 +78,4 @@ def test_save_outputs_csv_columns():
         with patch("tests.evaluate_model.OUTPUT_DIR", tmpdir):
             _save_outputs(df, y_true, y_pred, y_prob, cm, auc)
         result = pd.read_csv(os.path.join(tmpdir, "report.csv"))
-        assert set(["Amount", "true_label", "predicted_label", "fraud_probability"]).issubset(result.columns)
+        assert {"Amount", "true_label", "predicted_label", "fraud_probability"}.issubset(result.columns)

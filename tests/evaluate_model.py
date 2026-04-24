@@ -37,7 +37,7 @@ def _save_outputs(
     y_prob: np.ndarray,
     cm: np.ndarray,
     auc: float,
-):
+) -> None:
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # CSV report
@@ -51,8 +51,8 @@ def _save_outputs(
     # Confusion matrix heatmap
     fig, ax = plt.subplots(figsize=(6, 5))
     sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax,
-                xticklabels=["Normal", "Fraude"],
-                yticklabels=["Normal", "Fraude"])
+                xticklabels=["Normal", "Fraud"],
+                yticklabels=["Normal", "Fraud"])
     ax.set_xlabel("Prediction")
     ax.set_ylabel("True label")
     ax.set_title("Confusion Matrix")
