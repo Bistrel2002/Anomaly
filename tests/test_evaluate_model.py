@@ -1,5 +1,7 @@
+import io
 import os
 import tempfile
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 import numpy as np
@@ -81,10 +83,6 @@ def test_save_outputs_csv_columns():
         assert {"Amount", "true_label", "predicted_label", "fraud_probability"}.issubset(result.columns)
 
 
-import io
-from contextlib import redirect_stdout
-
-
 def test_phase2_skips_gracefully_when_api_down():
     df = make_dummy_df(n=10)
     # Add more legit rows so sample(500) doesn't fail — use the real function with a patched n
@@ -102,4 +100,4 @@ def test_phase2_skips_gracefully_when_api_down():
             run_phase2(df_large)
         output = buf.getvalue()
 
-    assert "Phase 2" in output or "non accessible" in output or "ignored" in output.lower()
+    assert "ignored" in output.lower() or "non accessible" in output

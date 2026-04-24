@@ -133,7 +133,7 @@ def run_phase2(df: pd.DataFrame):
     correct         = 0
     fraud_correct   = 0
     legit_correct   = 0
-    latencies: list = []
+    latencies: list[float] = []
 
     for _, row in sample.iterrows():
         payload = {"Time": float(row["Time"]), "Amount": float(row["Amount"]),
@@ -156,8 +156,12 @@ def run_phase2(df: pd.DataFrame):
 
     avg_lat_ms = (sum(latencies) / len(latencies) * 1000) if latencies else 0.0
 
+    fraud_pct = f"{fraud_correct/n_fraud*100:.1f}%" if n_fraud > 0 else "N/A"
+    legit_pct = f"{legit_correct/n_legit*100:.1f}%" if n_legit > 0 else "N/A"
+    total_pct = f"{correct/total*100:.1f}%" if total > 0 else "N/A"
+
     print(f"\n=== API SUMMARY ({total} transactions) ===")
-    print(f"Frauds correctly detected  : {fraud_correct}/{n_fraud} ({fraud_correct/n_fraud*100:.1f}%)")
-    print(f"Legit correctly classified : {legit_correct}/{n_legit} ({legit_correct/n_legit*100:.1f}%)")
-    print(f"Overall accuracy           : {correct}/{total} ({correct/total*100:.1f}%)")
+    print(f"Frauds correctly detected  : {fraud_correct}/{n_fraud} ({fraud_pct})")
+    print(f"Legit correctly classified : {legit_correct}/{n_legit} ({legit_pct})")
+    print(f"Overall accuracy           : {correct}/{total} ({total_pct})")
     print(f"Average latency            : {avg_lat_ms:.1f}ms")
