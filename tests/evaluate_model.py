@@ -2,7 +2,7 @@ import os
 import time
 import numpy as np
 import pandas as pd
-import joblib  # noqa: F401
+import joblib
 import matplotlib.pyplot as plt
 import seaborn as sns
 import requests
@@ -165,3 +165,23 @@ def run_phase2(df: pd.DataFrame):
     print(f"Legit correctly classified : {legit_correct}/{n_legit} ({legit_pct})")
     print(f"Overall accuracy           : {correct}/{total} ({total_pct})")
     print(f"Average latency            : {avg_lat_ms:.1f}ms")
+
+
+def main():
+    print("=" * 60)
+    print("FRAUD DETECTION MODEL — FULL EVALUATION")
+    print("=" * 60)
+
+    print("\nLoading model and scaler...")
+    model  = joblib.load(MODEL_PATH)
+    scaler = joblib.load(SCALER_PATH)
+    print("Model and scaler loaded.")
+
+    df = run_phase1(model, scaler)
+    run_phase2(df)
+
+    print("\nDone.")
+
+
+if __name__ == "__main__":
+    main()
