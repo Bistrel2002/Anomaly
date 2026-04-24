@@ -79,3 +79,27 @@ def test_save_outputs_csv_columns():
             _save_outputs(df, y_true, y_pred, y_prob, cm, auc)
         result = pd.read_csv(os.path.join(tmpdir, "report.csv"))
         assert {"Amount", "true_label", "predicted_label", "fraud_probability"}.issubset(result.columns)
+
+
+import io
+from contextlib import redirect_stdout
+
+
+def test_phase2_skips_gracefully_when_api_down():
+    df = make_dummy_df(n=10)
+    # Add more legit rows so sample(500) doesn't fail — use the real function with a patched n
+    df_large = pd.concat([df] * 100).reset_index(drop=True)
+    df_large.loc[0, "Class"] = 1   # ensure at least one fraud
+
+    from tests.evaluate_model import run_phase2
+    import unittest.mock as mock
+
+    # Simulate connection refused
+    with mock.patch("tests.evaluate_model.requests.get",
+                    side_effect=ConnectionError("refused")):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            run_phase2(df_large)
+        output = buf.getvalue()
+
+    assert "Phase 2" in output or "non accessible" in output or "ignored" in output.lower()

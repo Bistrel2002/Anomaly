@@ -5,7 +5,7 @@ import pandas as pd
 import joblib  # noqa: F401
 import matplotlib.pyplot as plt
 import seaborn as sns
-import requests  # noqa: F401
+import requests
 from sklearn.metrics import (
     confusion_matrix, classification_report,
     roc_auc_score, roc_curve,
@@ -104,3 +104,60 @@ def run_phase1(model, scaler) -> pd.DataFrame:
 
     _save_outputs(df, y, y_pred, y_prob, cm, auc)
     return df
+
+
+def run_phase2(df: pd.DataFrame):
+    print("\n" + "=" * 60)
+    print("PHASE 2 - API TEST")
+    print("=" * 60)
+
+    try:
+        requests.get(API_HEALTH, timeout=3).raise_for_status()
+    except Exception:
+        print("API not reachable at http://127.0.0.1:8001 — Phase 2 ignored.")
+        print("Start the API with `docker-compose up` then re-run.")
+        return
+
+    frauds = df[df["Class"] == 1]
+    legits = df[df["Class"] == 0]
+    n_sample = min(500, len(legits))
+    legits = legits.sample(n=n_sample, random_state=42)
+    sample = pd.concat([frauds, legits]).sample(frac=1, random_state=42).reset_index(drop=True)
+
+    n_fraud = len(frauds)
+    n_legit = len(legits)
+    total   = len(sample)
+    print(f"Sending {total} transactions ({n_fraud} frauds + {n_legit} legit)...")
+
+    v_cols          = [f"V{i}" for i in range(1, 29)]
+    correct         = 0
+    fraud_correct   = 0
+    legit_correct   = 0
+    latencies: list = []
+
+    for _, row in sample.iterrows():
+        payload = {"Time": float(row["Time"]), "Amount": float(row["Amount"]),
+                   **{c: float(row[c]) for c in v_cols}}
+        t0 = time.time()
+        try:
+            resp = requests.post(API_URL, json=payload, timeout=10)
+            latencies.append(time.time() - t0)
+            if resp.status_code == 200:
+                pred  = resp.json()["is_fraud"]
+                truth = bool(row["Class"])
+                if pred == truth:
+                    correct += 1
+                    if truth:
+                        fraud_correct += 1
+                    else:
+                        legit_correct += 1
+        except Exception as e:
+            print(f"  Warning: {e}")
+
+    avg_lat_ms = (sum(latencies) / len(latencies) * 1000) if latencies else 0.0
+
+    print(f"\n=== API SUMMARY ({total} transactions) ===")
+    print(f"Frauds correctly detected  : {fraud_correct}/{n_fraud} ({fraud_correct/n_fraud*100:.1f}%)")
+    print(f"Legit correctly classified : {legit_correct}/{n_legit} ({legit_correct/n_legit*100:.1f}%)")
+    print(f"Overall accuracy           : {correct}/{total} ({correct/total*100:.1f}%)")
+    print(f"Average latency            : {avg_lat_ms:.1f}ms")
