@@ -1,3 +1,7 @@
+import os
+import tempfile
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -39,3 +43,39 @@ def test_build_feature_matrix_labels():
     df = make_dummy_df()
     _, y = build_feature_matrix(df, DummyScaler())
     np.testing.assert_array_equal(y, [0, 1, 0, 1, 0])
+
+
+def test_save_outputs_creates_files():
+    y_true = np.array([0, 0, 1, 1, 0])
+    y_pred = np.array([0, 0, 1, 0, 0])
+    y_prob = np.array([0.1, 0.2, 0.9, 0.4, 0.1])
+    cm     = np.array([[3, 0], [1, 1]])
+    auc    = 0.875
+    df     = make_dummy_df()
+
+    from tests.evaluate_model import _save_outputs
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with patch("tests.evaluate_model.OUTPUT_DIR", tmpdir):
+            _save_outputs(df, y_true, y_pred, y_prob, cm, auc)
+        files = os.listdir(tmpdir)
+        assert "report.csv" in files
+        assert "confusion_matrix.png" in files
+        assert "roc_curve.png" in files
+
+
+def test_save_outputs_csv_columns():
+    y_true = np.array([0, 1])
+    y_pred = np.array([0, 1])
+    y_prob = np.array([0.05, 0.95])
+    cm     = np.array([[1, 0], [0, 1]])
+    auc    = 1.0
+    df     = make_dummy_df(n=2)
+
+    from tests.evaluate_model import _save_outputs
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with patch("tests.evaluate_model.OUTPUT_DIR", tmpdir):
+            _save_outputs(df, y_true, y_pred, y_prob, cm, auc)
+        result = pd.read_csv(os.path.join(tmpdir, "report.csv"))
+        assert set(["Amount", "true_label", "predicted_label", "fraud_probability"]).issubset(result.columns)
