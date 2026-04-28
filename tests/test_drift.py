@@ -69,7 +69,6 @@ def test_compute_drift_no_drift(tmp_path):
     for f in FEATURES:
         assert result["results"][f]["drift_detected"] is False
 
-
 def test_compute_drift_drift_detected(tmp_path):
     pkl = _make_baseline_pkl(tmp_path)
     detector = DriftDetector(baseline_path=pkl)
@@ -80,7 +79,6 @@ def test_compute_drift_drift_detected(tmp_path):
 
     assert result["drift_detected"] is True
     assert any(result["results"][f]["drift_detected"] for f in FEATURES)
-
 
 def test_compute_drift_result_structure(tmp_path):
     pkl = _make_baseline_pkl(tmp_path)
