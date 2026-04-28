@@ -28,6 +28,27 @@ services:
       - db
     restart: always
 
+  # --- Secure backup (runs every 2 hours) ---
+  backup:
+    build: .
+    container_name: anomaly_backup
+    command: >
+      sh -c "while true; do
+        python /code/scripts/backup_secure.py;
+        sleep 7200;
+      done"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      VAULT_ADDR: ${VAULT_ADDR}
+      VAULT_TOKEN: ${VAULT_TOKEN}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+    depends_on:
+      - db
+    restart: always
+
   # --- cAdvisor (CPU / Mémoire des containers Docker) ---
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:latest

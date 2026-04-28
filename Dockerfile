@@ -6,6 +6,11 @@ FROM python:3.11-slim
 # Définir le répertoire de travail dans le container
 WORKDIR /code
 
+# Install postgresql-client for pg_dump / psql used by backup scripts
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copier et installer les dépendances en premier (cache Docker)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
