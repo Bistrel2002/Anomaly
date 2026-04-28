@@ -34,7 +34,14 @@ def generate_baseline(data_path: str, output_path: str) -> dict:
         Dict mapping each feature name to its numpy array.
     """
     df = pd.read_csv(data_path)
+    missing = [f for f in FEATURES if f not in df.columns]
+    if missing:
+        raise ValueError(
+            f"CSV is missing required feature columns: {missing}. "
+            f"Available columns: {list(df.columns)}"
+        )
     baseline = {f: df[f].values for f in FEATURES}
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     joblib.dump(baseline, output_path)
     print(f"Baseline saved to {output_path}")
     print(f"  Rows : {len(df):,}")
