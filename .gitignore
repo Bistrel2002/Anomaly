@@ -8,3 +8,4 @@ __pycache__/
 env/
 CLAUDE-2.md
 SKILL_secure-db-backup.md
+app/drift_baseline.pkl
