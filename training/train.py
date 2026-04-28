@@ -200,24 +200,34 @@ df.insert(1, "scaled_time", scaled_time)
 print("Scaling complete. Columns re-ordered.")
 
 # ---------------------------------------------------------------------------
-# 8. Train / test split + SMOTE resampling
+# 8. Train / validation / test split + SMOTE on train only
 # ---------------------------------------------------------------------------
 
-print("\nPreparing for Modelling: train/test split then SMOTE on train only.")
+print("\nPreparing for Modelling: 70/15/15 stratified split, SMOTE on train only.")
 X = df.drop("Class", axis=1)
 y = df["Class"]
 
-# Split *before* SMOTE to prevent data leakage.
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y,
+# Step 1 — hold out 15% as the final test set (never touched until final eval).
+X_temp, X_test, y_temp, y_test = train_test_split(
+    X, y, test_size=0.15, random_state=42, stratify=y,
 )
-print(f"Original X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
 
-print("\nApplying SMOTE to X_train...")
+# Step 2 — split the remaining 85% into 70% train / 15% validation (of total).
+X_train, X_val, y_train, y_val = train_test_split(
+    X_temp, y_temp, test_size=0.15 / 0.85, random_state=42, stratify=y_temp,
+)
+
+print(f"Train      : {X_train.shape[0]:,} rows  ({X_train.shape[0]/len(X)*100:.0f}%)")
+print(f"Validation : {X_val.shape[0]:,} rows  ({X_val.shape[0]/len(X)*100:.0f}%)")
+print(f"Test       : {X_test.shape[0]:,} rows  ({X_test.shape[0]/len(X)*100:.0f}%)")
+
+# SMOTE applied ONLY to the training split — validation and test keep the
+# original imbalanced distribution to reflect real-world conditions.
+print("\nApplying SMOTE to X_train only...")
 smote = SMOTE(random_state=42)
 X_train_sm, y_train_sm = smote.fit_resample(X_train, y_train)
 
-print(f"SMOTE applied. X_train_sm shape: {X_train_sm.shape}, y_train_sm shape: {y_train_sm.shape}")
+print(f"SMOTE applied. X_train_sm shape: {X_train_sm.shape}")
 print(f"Class distribution after SMOTE:\n{y_train_sm.value_counts()}")
 
 print("\nEDA and feature-engineering pipeline complete. Data is ready for training.")
@@ -240,13 +250,29 @@ rf_clf = RandomForestClassifier(
 rf_clf.fit(X_train_sm, y_train_sm)
 
 # ---------------------------------------------------------------------------
-# 10. Evaluation on test set
+# 10. Evaluation on validation set (used during development)
 # ---------------------------------------------------------------------------
 
-print("Evaluating Random Forest on Test Set...")
+print("\n" + "=" * 60)
+print("VALIDATION SET — unbiased estimate during development")
+print("=" * 60)
+y_pred_val = rf_clf.predict(X_val)
+y_prob_val = rf_clf.predict_proba(X_val)[:, 1]
+
+print("\nConfusion Matrix:\n", confusion_matrix(y_val, y_pred_val))
+print("\nClassification Report:\n", classification_report(y_val, y_pred_val, target_names=["Normal", "Fraud"]))
+print(f"ROC-AUC Score: {roc_auc_score(y_val, y_prob_val):.4f}")
+
+# ---------------------------------------------------------------------------
+# 11. Evaluation on test set (final holdout — touch only once)
+# ---------------------------------------------------------------------------
+
+print("\n" + "=" * 60)
+print("TEST SET — final unbiased evaluation (hold-out)")
+print("=" * 60)
 y_pred_rf = rf_clf.predict(X_test)
 y_prob_rf = rf_clf.predict_proba(X_test)[:, 1]
 
 print("\nConfusion Matrix:\n", confusion_matrix(y_test, y_pred_rf))
-print("\nClassification Report:\n", classification_report(y_test, y_pred_rf))
+print("\nClassification Report:\n", classification_report(y_test, y_pred_rf, target_names=["Normal", "Fraud"]))
 print(f"ROC-AUC Score: {roc_auc_score(y_test, y_prob_rf):.4f}")

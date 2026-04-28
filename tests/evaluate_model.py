@@ -28,13 +28,14 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
+from sklearn.model_selection import train_test_split
 
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-DATA_PATH = os.path.join(PROJECT_ROOT, "data", "transactions.csv")
+DATA_PATH = os.path.join(PROJECT_ROOT, "data", "creditcard.csv")
 MODEL_PATH = os.path.join(PROJECT_ROOT, "app", "random_forest_fraud_model.joblib")
 SCALER_PATH = os.path.join(PROJECT_ROOT, "app", "robust_scaler.joblib")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "evaluation_output")
@@ -147,7 +148,11 @@ def _save_outputs(
 
 
 def run_phase1(model, scaler) -> pd.DataFrame:
-    """Evaluate the model offline against the full dataset.
+    """Evaluate the model on the held-out 15% test set only.
+
+    Reproduces the exact same two-step split used in ``train.py``
+    (70/15/15 stratified) so that evaluation is performed exclusively on
+    data the model has **never seen** during training.
 
     Args:
         model: Trained scikit-learn classifier.
@@ -157,30 +162,43 @@ def run_phase1(model, scaler) -> pd.DataFrame:
         The loaded DataFrame (passed to Phase 2 for API testing).
     """
     print("\n" + "=" * 60)
-    print("PHASE 1 — FULL ML EVALUATION")
+    print("PHASE 1 — HELD-OUT TEST SET EVALUATION (unbiased)")
     print("=" * 60)
 
     t0 = time.time()
     df = pd.read_csv(DATA_PATH)
     X, y = build_feature_matrix(df, scaler)
 
-    n_fraud = int(y.sum())
-    n_legit = len(y) - n_fraud
-    print(f"Dataset : {len(y):,} transactions ({n_fraud} frauds, {n_legit:,} legit)")
+    # Reproduce the exact same 70/15/15 split used during training.
+    # Step 1: hold out 15% test.
+    _, X_test, _, y_test = train_test_split(
+        X, y, test_size=0.15, random_state=42, stratify=y,
+    )
 
-    y_pred = model.predict(X)
-    y_prob = model.predict_proba(X)[:, 1]
-    cm = confusion_matrix(y, y_pred)
-    auc = roc_auc_score(y, y_prob)
+    n_total = len(y)
+    n_test = len(y_test)
+    n_fraud = int(y_test.sum())
+    n_legit = n_test - n_fraud
+    print(f"Full dataset   : {n_total:,} transactions")
+    print(f"Test set (15%) : {n_test:,} transactions ({n_fraud} frauds, {n_legit:,} legit)")
+    print("(Training data excluded — these metrics are unbiased.)")
+
+    y_pred = model.predict(X_test)
+    y_prob = model.predict_proba(X_test)[:, 1]
+    cm = confusion_matrix(y_test, y_pred)
+    auc = roc_auc_score(y_test, y_prob)
 
     print("\nConfusion Matrix:")
     print(cm)
     print("\nClassification Report:")
-    print(classification_report(y, y_pred, target_names=["Normal", "Fraud"]))
+    print(classification_report(y_test, y_pred, target_names=["Normal", "Fraud"]))
     print(f"ROC-AUC Score      : {auc:.4f}")
     print(f"Evaluation time    : {time.time() - t0:.1f}s")
 
-    _save_outputs(df, y, y_pred, y_prob, cm, auc)
+    # Rebuild df_test aligned with the test split indices.
+    _, df_test = train_test_split(df, test_size=0.15, random_state=42, stratify=y)
+    df_test = df_test.reset_index(drop=True)
+    _save_outputs(df_test, y_test, y_pred, y_prob, cm, auc)
     return df
 
 
