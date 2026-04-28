@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copier le code de l'application
 COPY app/ ./app/
+COPY scripts/ ./scripts/
 
 # Exposer le port de l'API
 EXPOSE 8000

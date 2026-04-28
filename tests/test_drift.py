@@ -58,11 +58,14 @@ def test_is_ready_false_when_no_baseline(tmp_path):
 
 
 def test_compute_drift_no_drift(tmp_path):
-    pkl = _make_baseline_pkl(tmp_path)
-    baseline = joblib.load(pkl)
+    rng = np.random.default_rng(42)
+    # Use identical arrays for baseline and live data — guarantees p_value = 1.0
+    exact = {f: rng.normal(0, 1, 150) for f in FEATURES}
+    pkl = str(tmp_path / "baseline.pkl")
+    joblib.dump(exact, pkl)
     detector = DriftDetector(baseline_path=pkl)
 
-    records = _make_records(baseline)
+    records = [{f: float(v) for f, v in zip(FEATURES, [exact[f][i] for f in FEATURES])} for i in range(150)]
     result = detector.compute_drift(records)
 
     assert result["drift_detected"] is False

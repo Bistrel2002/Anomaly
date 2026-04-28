@@ -236,10 +236,11 @@ async def predict_fraud(
         db.refresh(db_record)
 
         # Drift detection trigger: every DRIFT_WINDOW predictions
+        should_check = False
         with _count_lock:
             _prediction_count += 1
-            should_check = _prediction_count >= DRIFT_WINDOW
-            if should_check:
+            if _prediction_count >= DRIFT_WINDOW:
+                should_check = True
                 _prediction_count = 0
 
         try:
