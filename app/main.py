@@ -92,6 +92,7 @@ async def lifespan(app: FastAPI):
     """
     global fraud_detector  # noqa: PLW0603
     global drift_detector  # noqa: PLW0603
+    global _prediction_count  # noqa: PLW0603
 
     logger.info("Starting server – loading ML model…")
     try:
