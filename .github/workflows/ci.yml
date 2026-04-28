@@ -49,6 +49,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set lowercase image name
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: echo "IMAGE_NAME=ghcr.io/${REPO_OWNER,,}/anomaly" >> $GITHUB_ENV
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -62,5 +67,5 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/anomaly:latest
-            ghcr.io/${{ github.repository_owner }}/anomaly:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
