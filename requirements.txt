@@ -28,3 +28,8 @@ joblib
 
 # Data Drift & Validation (Optional but recommended for Step 7)
 evidently
+
+# Secure backup (Step 10)
+hvac
+cryptography
+boto3
