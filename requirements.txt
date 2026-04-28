@@ -7,7 +7,7 @@ python-dotenv
 # Data Processing & Machine Learning
 pandas
 numpy
-scikit-learn
+scikit-learn==1.7.2
 scipy
 imbalanced-learn
 
