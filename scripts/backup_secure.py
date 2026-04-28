@@ -174,7 +174,8 @@ def generate_metadata_json(timestamp: str, dump_file: str, enc_file: str,
 
 
 def upload_to_s3(enc_file: str, json_file: str, timestamp: str) -> None:
-    s3 = boto3.client("s3")
+    endpoint = os.environ.get("AWS_ENDPOINT_URL")
+    s3 = boto3.client("s3", endpoint_url=endpoint)
     bucket = os.environ["S3_BUCKET_NAME"]
     date_path = f"{timestamp[:4]}/{timestamp[4:6]}/{timestamp[6:8]}"
 

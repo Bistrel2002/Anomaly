@@ -84,7 +84,8 @@ def get_db_config() -> dict:
 # ---------------------------------------------------------------------------
 
 def list_available_backups() -> list[dict]:
-    s3 = boto3.client("s3")
+    endpoint = os.environ.get("AWS_ENDPOINT_URL")
+    s3 = boto3.client("s3", endpoint_url=endpoint)
     bucket = os.environ["S3_BUCKET_NAME"]
     response = s3.list_objects_v2(Bucket=bucket, Prefix="backups/")
 
@@ -109,7 +110,8 @@ def list_available_backups() -> list[dict]:
 
 
 def download_backup(selected: dict) -> tuple[str, str]:
-    s3 = boto3.client("s3")
+    endpoint = os.environ.get("AWS_ENDPOINT_URL")
+    s3 = boto3.client("s3", endpoint_url=endpoint)
     bucket = os.environ["S3_BUCKET_NAME"]
     meta = selected["meta"]
 
