@@ -26,10 +26,12 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 # Connection
 # ---------------------------------------------------------------------------
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://anomaly_user:anomaly_password@127.0.0.1:5433/anomaly_db",
-)
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL environment variable is not set. "
+        "Set it to a valid PostgreSQL connection string before starting the server."
+    )
 
 engine = create_engine(DATABASE_URL)
 
