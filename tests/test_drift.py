@@ -33,3 +33,74 @@ def test_generate_baseline_creates_file(tmp_path):
     for f in FEATURES:
         assert f in loaded
         assert len(loaded[f]) == 50
+
+
+from app.drift import DriftDetector
+
+
+def _make_baseline_pkl(tmp_path, n: int = 500) -> str:
+    rng = np.random.default_rng(42)
+    baseline = {f: rng.normal(0, 1, n) for f in FEATURES}
+    pkl = str(tmp_path / "baseline.pkl")
+    joblib.dump(baseline, pkl)
+    return pkl
+
+
+def _make_records(baseline: dict, n: int = 150) -> list[dict]:
+    rng = np.random.default_rng(42)
+    return [
+        {f: float(rng.choice(baseline[f])) for f in FEATURES}
+        for _ in range(n)
+    ]
+
+
+def test_is_ready_false_when_no_baseline(tmp_path):
+    detector = DriftDetector(baseline_path=str(tmp_path / "nonexistent.pkl"))
+    assert detector.is_ready is False
+    result = detector.compute_drift([])
+    assert result == {"status": "baseline_not_loaded"}
+
+
+def test_compute_drift_no_drift(tmp_path):
+    pkl = _make_baseline_pkl(tmp_path)
+    baseline = joblib.load(pkl)
+    detector = DriftDetector(baseline_path=pkl)
+
+    records = _make_records(baseline)
+    result = detector.compute_drift(records)
+
+    assert result["drift_detected"] is False
+    for f in FEATURES:
+        assert result["results"][f]["drift_detected"] is False
+
+
+def test_compute_drift_drift_detected(tmp_path):
+    pkl = _make_baseline_pkl(tmp_path)
+    detector = DriftDetector(baseline_path=pkl)
+
+    rng = np.random.default_rng(99)
+    records = [{f: float(rng.normal(100, 1)) for f in FEATURES} for _ in range(150)]
+    result = detector.compute_drift(records)
+
+    assert result["drift_detected"] is True
+    assert any(result["results"][f]["drift_detected"] for f in FEATURES)
+
+
+def test_compute_drift_result_structure(tmp_path):
+    pkl = _make_baseline_pkl(tmp_path)
+    baseline = joblib.load(pkl)
+    detector = DriftDetector(baseline_path=pkl)
+
+    records = _make_records(baseline)
+    result = detector.compute_drift(records)
+
+    assert "window" in result
+    assert "features_monitored" in result
+    assert "results" in result
+    assert "drift_detected" in result
+    assert "last_checked_at" in result
+    for f in FEATURES:
+        r = result["results"][f]
+        assert "statistic" in r
+        assert "p_value" in r
+        assert "drift_detected" in r
