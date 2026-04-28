@@ -41,8 +41,11 @@ class DriftDetector:
                 "drift_baseline.pkl not found at %s — drift detection disabled.", path
             )
             return
-        self.baseline = joblib.load(path)
-        logger.info("Drift baseline loaded: %d features.", len(self.baseline))
+        try:
+            self.baseline = joblib.load(path)
+            logger.info("Drift baseline loaded: %d features.", len(self.baseline))
+        except Exception as exc:
+            logger.error("Failed to load drift baseline at %s: %s", path, exc)
 
     @property
     def is_ready(self) -> bool:
@@ -57,8 +60,6 @@ class DriftDetector:
         Returns:
             Updated DRIFT_STATUS dict, or {"status": "baseline_not_loaded"}.
         """
-        global DRIFT_STATUS  # noqa: PLW0603
-
         if not self.is_ready:
             return {"status": "baseline_not_loaded"}
 
@@ -94,7 +95,7 @@ class DriftDetector:
                 logger.error("KS test error for %s: %s", feature, exc)
                 results[feature] = {"drift_detected": False, "error": str(exc)}
 
-        DRIFT_STATUS.update({
+        snapshot = {
             "window": DRIFT_WINDOW,
             "features_monitored": FEATURES,
             "results": results,
@@ -102,6 +103,6 @@ class DriftDetector:
             "last_checked_at": datetime.datetime.now(
                 datetime.timezone.utc
             ).isoformat(),
-        })
-
-        return DRIFT_STATUS
+        }
+        DRIFT_STATUS.update(snapshot)
+        return snapshot

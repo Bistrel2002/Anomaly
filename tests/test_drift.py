@@ -7,9 +7,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from app.drift import DriftDetector, FEATURES
 from scripts.generate_baseline import generate_baseline
-
-FEATURES = ["V4", "V10", "V11", "V12", "V14", "V16", "Amount"]
 
 _ALL_COLS = [f"V{i}" for i in range(1, 29)] + ["Amount", "Time", "Class"]
 
@@ -33,9 +32,6 @@ def test_generate_baseline_creates_file(tmp_path):
     for f in FEATURES:
         assert f in loaded
         assert len(loaded[f]) == 50
-
-
-from app.drift import DriftDetector
 
 
 def _make_baseline_pkl(tmp_path, n: int = 500) -> str:

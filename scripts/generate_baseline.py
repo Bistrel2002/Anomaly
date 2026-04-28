@@ -10,12 +10,15 @@ Usage:
     python scripts/generate_baseline.py
 """
 
+import logging
 import os
 
 import joblib
 import pandas as pd
 
-FEATURES = ["V4", "V10", "V11", "V12", "V14", "V16", "Amount"]
+from app.drift import FEATURES
+
+logger = logging.getLogger(__name__)
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, ".."))
@@ -43,10 +46,10 @@ def generate_baseline(data_path: str, output_path: str) -> dict:
     baseline = {f: df[f].values for f in FEATURES}
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     joblib.dump(baseline, output_path)
-    print(f"Baseline saved to {output_path}")
-    print(f"  Rows : {len(df):,}")
+    logger.info("Baseline saved to %s", output_path)
+    logger.info("  Rows : %d", len(df))
     for f, arr in baseline.items():
-        print(f"  {f:8s}: mean={arr.mean():.4f}  std={arr.std():.4f}")
+        logger.info("  %-8s: mean=%.4f  std=%.4f", f, arr.mean(), arr.std())
     return baseline
 
 
