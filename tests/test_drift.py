@@ -100,3 +100,45 @@ def test_compute_drift_result_structure(tmp_path):
         assert "statistic" in r
         assert "p_value" in r
         assert "drift_detected" in r
+
+
+def test_drift_endpoint_not_checked_yet(monkeypatch):
+    import app.drift as drift_module
+    monkeypatch.setattr(drift_module, "DRIFT_STATUS", {})
+
+    from fastapi.testclient import TestClient
+    from app.main import app as fastapi_app
+
+    client = TestClient(fastapi_app)
+    response = client.get("/drift")
+    assert response.status_code == 200
+    assert response.json() == {"status": "not_checked_yet"}
+
+
+def test_drift_endpoint_returns_full_status(monkeypatch):
+    import app.drift as drift_module
+
+    fake_status = {
+        "window": 150,
+        "features_monitored": FEATURES,
+        "results": {
+            f: {"statistic": 0.05, "p_value": 0.50, "drift_detected": False}
+            for f in FEATURES
+        },
+        "drift_detected": False,
+        "last_checked_at": "2026-04-28T12:00:00+00:00",
+    }
+    monkeypatch.setattr(drift_module, "DRIFT_STATUS", fake_status)
+
+    from fastapi.testclient import TestClient
+    from app.main import app as fastapi_app
+
+    client = TestClient(fastapi_app)
+    response = client.get("/drift")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["drift_detected"] is False
+    assert "results" in data
+    assert "last_checked_at" in data
+    for f in FEATURES:
+        assert f in data["results"]

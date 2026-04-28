@@ -16,13 +16,18 @@ import time
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
-from prometheus_client import Counter, Histogram
+import threading
+
+from prometheus_client import Counter, Gauge, Histogram
 from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy.orm import Session
 
 from app.database import Base, TransactionRecord, engine, get_db
 from app.model import FraudDetector
 from app.schemas import PredictionOutput, TransactionInput
+
+import app.drift as _drift_module
+from app.drift import DriftDetector, DRIFT_WINDOW
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -52,12 +57,22 @@ PREDICTION_LATENCY = Histogram(
     buckets=[0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0],
 )
 
+DATA_DRIFT_DETECTED = Gauge(
+    "data_drift_detected",
+    "1 if KS drift detected for a feature in the last window, 0 otherwise.",
+    ["feature"],
+)
+
+_prediction_count: int = 0
+_count_lock: threading.Lock = threading.Lock()
+
 # ---------------------------------------------------------------------------
 # Application lifecycle
 # ---------------------------------------------------------------------------
 
-# Holds the ML model in memory for the lifetime of the process.
+# Holds the ML model and drift detector in memory for the lifetime of the process.
 fraud_detector: FraudDetector | None = None
+drift_detector: DriftDetector | None = None
 
 
 @asynccontextmanager
@@ -76,6 +91,7 @@ async def lifespan(app: FastAPI):
         Control to the running application between startup and shutdown.
     """
     global fraud_detector  # noqa: PLW0603
+    global drift_detector  # noqa: PLW0603
 
     logger.info("Starting server – loading ML model…")
     try:
@@ -90,10 +106,18 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error("Database connection error: %s", exc)
 
+    logger.info("Initialising drift detector…")
+    drift_detector = DriftDetector()
+    if drift_detector.is_ready:
+        logger.info("Drift detector ready.")
+    else:
+        logger.warning("Drift baseline not found — drift detection disabled.")
+
     yield
 
     # Shutdown: release model memory.
     fraud_detector = None
+    drift_detector = None
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +228,31 @@ async def predict_fraud(
         db.commit()
         db.refresh(db_record)
 
+        # Drift detection trigger: every DRIFT_WINDOW predictions
+        global _prediction_count  # noqa: PLW0603
+        with _count_lock:
+            _prediction_count += 1
+            should_check = _prediction_count >= DRIFT_WINDOW
+            if should_check:
+                _prediction_count = 0
+
+        if should_check and drift_detector is not None and drift_detector.is_ready:
+            recent = (
+                db.query(TransactionRecord)
+                .order_by(TransactionRecord.id.desc())
+                .limit(DRIFT_WINDOW)
+                .all()
+            )
+            drift_results = drift_detector.compute_drift(
+                [r.features for r in recent]
+            )
+            if "results" in drift_results:
+                for feat, info in drift_results["results"].items():
+                    if "drift_detected" in info:
+                        DATA_DRIFT_DETECTED.labels(feature=feat).set(
+                            1 if info["drift_detected"] else 0
+                        )
+
         return PredictionOutput(
             transaction_time=transaction.Time,
             transaction_amount=transaction.Amount,
@@ -218,6 +267,19 @@ async def predict_fraud(
             status_code=500,
             detail=f"Internal inference error: {exc}",
         ) from exc
+
+
+@app.get("/drift")
+async def get_drift_status():
+    """Return the latest drift detection results.
+
+    Returns:
+        dict: Latest DRIFT_STATUS, or {"status": "not_checked_yet"} if
+        fewer than 150 predictions have been processed since startup.
+    """
+    if not _drift_module.DRIFT_STATUS:
+        return {"status": "not_checked_yet"}
+    return _drift_module.DRIFT_STATUS
 
 
 # ---------------------------------------------------------------------------
