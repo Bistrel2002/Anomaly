@@ -1,14 +1,30 @@
+"""Pydantic schemas for API request and response validation.
+
+These models enforce strict type-checking on every incoming transaction
+payload and guarantee a consistent JSON structure in every API response.
+
+Pipeline step: Step 4 – Model serving / data validation.
+"""
+
 from pydantic import BaseModel, Field
 
-# ÉTAPE 4 — Mise en Production (Serving) / Validation de données
-# Fichier pour les schémas de validation (ex: Pydantic)
 
 class TransactionInput(BaseModel):
+    """Schema for an incoming credit-card transaction.
+
+    Each field maps directly to a column in the original Kaggle
+    ``creditcard.csv`` dataset.  The 28 ``V`` features are
+    dimensionality-reduced via PCA; their real-world meaning is
+    anonymised for confidentiality.
+
+    Attributes:
+        Time: Seconds elapsed since the first transaction in the
+            dataset.
+        V1–V28: PCA-transformed anonymised features.
+        Amount: Monetary value of the transaction.
     """
-    Spécifie la forme exacte de la donnée que l'API s'attend à recevoir 
-    lorsqu'un client demande une prédiction de fraude.
-    """
-    Time: float
+
+    Time: float = Field(..., description="Seconds elapsed since the first transaction")
     V1: float
     V2: float
     V3: float
@@ -37,12 +53,20 @@ class TransactionInput(BaseModel):
     V26: float
     V27: float
     V28: float
-    Amount: float = Field(..., description="Le montant de la transaction")
+    Amount: float = Field(..., description="Transaction amount in original currency")
+
 
 class PredictionOutput(BaseModel):
+    """Schema for the prediction response returned by ``/predict``.
+
+    Attributes:
+        transaction_time: Echo of the input ``Time`` value.
+        transaction_amount: Echo of the input ``Amount`` value.
+        is_fraud: Binary classification result (``True`` = fraud).
+        fraud_probability: Model confidence score in [0, 1].
+        message: Human-readable summary of the prediction.
     """
-    Spécifie la forme exacte de la réponse renvoyée par l'API.
-    """
+
     transaction_time: float
     transaction_amount: float
     is_fraud: bool

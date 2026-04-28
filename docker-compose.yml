@@ -1,4 +1,8 @@
+# Step 6 & 9 — Full Docker Compose orchestration
+# Services: FastAPI API + PostgreSQL + Prometheus + Grafana
+
 services:
+  # --- PostgreSQL database ---
   db:
     image: postgres:15
     container_name: anomaly_postgres
@@ -12,5 +16,66 @@ services:
       - postgres_data:/var/lib/postgresql/data
     restart: always
 
+  # --- FastAPI ML inference API ---
+  api:
+    build: .
+    container_name: anomaly_api
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: postgresql://anomaly_user:anomaly_password@db:5432/anomaly_db
+    depends_on:
+      - db
+    restart: always
+
+  # --- cAdvisor (CPU / Mémoire des containers Docker) ---
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    platform: linux/arm64
+    container_name: anomaly_cadvisor
+    ports:
+      - "8083:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    restart: always
+
+  # --- Prometheus (Collecte de métriques) ---
+  prometheus:
+    image: prom/prometheus:latest
+    platform: linux/arm64
+    container_name: anomaly_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    depends_on:
+      - api
+      - cadvisor
+    restart: always
+
+  # --- Grafana (visualisation & dashboards) ---
+  grafana:
+    image: grafana/grafana:latest
+    platform: linux/arm64
+    container_name: anomaly_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: always
+
 volumes:
   postgres_data:
+  prometheus_data:
+  grafana_data:

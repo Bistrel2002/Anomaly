@@ -1,0 +1,13 @@
+# ÉTAPE 6 — Auto-provisioning de la datasource Prometheus dans Grafana
+# Grafana chargera automatiquement cette config au démarrage
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    uid: prometheus
+    url: http://prometheus:9090   # Nom du service Docker
+    isDefault: true
+    editable: false

@@ -1,111 +1,229 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+"""FastAPI application entry point for the Fraud Detection ML pipeline.
+
+This module bootstraps the web server, loads the trained Random Forest model
+into memory at startup, and exposes the ``/predict`` endpoint that receives
+credit-card transaction data, runs real-time inference, persists results to
+PostgreSQL, and feeds business metrics to Prometheus.
+
+Pipeline steps covered:
+    - Step 4: Model serving / inference API
+    - Step 5: PostgreSQL persistence
+    - Step 6: Prometheus + Grafana monitoring
+"""
+
 import logging
-from app.schemas import TransactionInput, PredictionOutput
+import time
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI, HTTPException
+from prometheus_client import Counter, Histogram
+from prometheus_fastapi_instrumentator import Instrumentator
+from sqlalchemy.orm import Session
+
+from app.database import Base, TransactionRecord, engine, get_db
 from app.model import FraudDetector
+from app.schemas import PredictionOutput, TransactionInput
 
-# ÉTAPE 4 — Serveur Backend / Inférence du modèle
-# Point d'entrée principal (Serveur Web)
-
-# Configuration du logging pour voir ce qui se passe dans la console
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-from contextlib import asynccontextmanager
-from app.database import Base, engine, get_db, TransactionRecord
-from sqlalchemy.orm import Session
-from fastapi import Depends
+# ---------------------------------------------------------------------------
+# Prometheus – custom business metrics
+# ---------------------------------------------------------------------------
 
-# Variable globale pour stocker le modèle (chargé au démarrage)
-fraud_detector = None
+FRAUD_PREDICTIONS = Counter(
+    "fraud_predictions_total",
+    "Total number of predictions broken down by outcome.",
+    ["result"],  # label values: "fraud" | "normal"
+)
+
+FRAUD_PROBABILITY = Histogram(
+    "fraud_probability_score",
+    "Distribution of fraud probability scores returned by the model.",
+    buckets=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99, 1.0],
+)
+
+PREDICTION_LATENCY = Histogram(
+    "prediction_latency_seconds",
+    "Time spent inside the ML model for a single inference (seconds).",
+    buckets=[0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0],
+)
+
+# ---------------------------------------------------------------------------
+# Application lifecycle
+# ---------------------------------------------------------------------------
+
+# Holds the ML model in memory for the lifetime of the process.
+fraud_detector: FraudDetector | None = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Manage startup and shutdown resources for the FastAPI application.
+
+    On startup:
+        1. Load the serialised Random Forest model into memory.
+        2. Ensure all SQLAlchemy ORM tables exist in PostgreSQL.
+
+    On shutdown:
+        Release the model reference so the garbage collector can reclaim
+        memory.
+
+    Yields:
+        Control to the running application between startup and shutdown.
     """
-    S'exécute au démarrage et à l'arrêt de l'application.
-    C'est ici qu'on charge les gros fichiers (.joblib) en mémoire.
-    """
-    global fraud_detector
-    logger.info("Démarrage du serveur et chargement de l'intelligence artificielle...")
+    global fraud_detector  # noqa: PLW0603
+
+    logger.info("Starting server – loading ML model…")
     try:
         fraud_detector = FraudDetector()
-    except Exception as e:
-        logger.error(f"Échec critique du chargement du modèle: {e}")
-        
-    logger.info("Initialisation de la base de données PostgreSQL...")
+    except Exception as exc:
+        logger.error("Critical failure while loading the model: %s", exc)
+
+    logger.info("Initialising PostgreSQL tables…")
     try:
         Base.metadata.create_all(bind=engine)
-        logger.info("Tables créées avec succès.")
-    except Exception as e:
-        logger.error(f"Erreur de connexion à la base de données: {e}")
-        
+        logger.info("Database tables created successfully.")
+    except Exception as exc:
+        logger.error("Database connection error: %s", exc)
+
     yield
-    # Code exécuté à l'arrêt de l'API (ex: nettoyer la mémoire si nécessaire)
+
+    # Shutdown: release model memory.
     fraud_detector = None
 
-# Instanciation de l'application FastAPI
+
+# ---------------------------------------------------------------------------
+# FastAPI application instance
+# ---------------------------------------------------------------------------
+
 app = FastAPI(
     title="Fraud Detection ML API",
-    description="API MLOps recevant des transactions en temps réel pour détecter la fraude à la carte bancaire.",
+    description=(
+        "MLOps API that receives credit-card transactions in real time, "
+        "predicts fraud probability, persists results, and exposes "
+        "Prometheus metrics."
+    ),
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
+
+# Auto-instrument HTTP metrics (requests/sec, latency, status codes).
+Instrumentator().instrument(app).expose(app)
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
 
 @app.get("/")
 async def root():
-    """Route de santé (Health Check)"""
+    """Health-check endpoint.
+
+    Returns:
+        dict: Simple status message confirming the API is operational.
+    """
     return {"message": "✅ Fraud Detection API is UP and Running!"}
 
+
 @app.post("/predict", response_model=PredictionOutput)
-async def predict_fraud(transaction: TransactionInput, db: Session = Depends(get_db)):
+async def predict_fraud(
+    transaction: TransactionInput,
+    db: Session = Depends(get_db),
+):
+    """Run fraud inference on a single transaction.
+
+    Workflow:
+        1. Validate that the ML model is loaded and available.
+        2. Run inference and measure latency.
+        3. Record Prometheus business metrics (prediction count, score
+           distribution, inference latency).
+        4. Persist the transaction and its prediction to PostgreSQL.
+        5. Return the structured prediction response.
+
+    Args:
+        transaction: Validated input containing Time, V1–V28, and Amount.
+        db: SQLAlchemy session injected by FastAPI's dependency system.
+
+    Returns:
+        PredictionOutput: Prediction result with fraud flag, probability,
+        and a human-readable message.
+
+    Raises:
+        HTTPException 503: If the ML model is not loaded.
+        HTTPException 500: If an unexpected error occurs during inference.
     """
-    Endpoint principal qui reçoit une transaction et retourne la prédiction.
-    Maintenant, il sauvegarde aussi le résultat dans PostgreSQL.
-    """
-    global fraud_detector
-    
+    global fraud_detector  # noqa: PLW0603
+
     if fraud_detector is None or fraud_detector.model is None:
         raise HTTPException(
-            status_code=503, 
-            detail="Le service ML est indisponible ou le modèle n'est pas chargé correctement."
+            status_code=503,
+            detail="ML service unavailable – model not loaded.",
         )
 
     try:
-        # On passe la transaction validée par Pydantic à notre classe métier FraudDetector
+        # --- Inference & latency tracking ---
+        start_time = time.time()
         prediction_result = fraud_detector.predict(transaction)
-        
-        # On formate la réponse pour qu'elle corresponde au schéma PredictionOutput
+        inference_duration = time.time() - start_time
+        PREDICTION_LATENCY.observe(inference_duration)
+
         is_fraud = prediction_result["is_fraud"]
         prob = prediction_result["fraud_probability"]
-        
-        message = "ALERTE: Transaction Suspecte (Fraude probable)!" if is_fraud else "Transaction Normale."
-        
-        # --- NOUVEAU: Sauvegarde en base de données ---
-        # On extrait les features pertinentes (V1 à V28)
-        features_dict = {f"V{i}": getattr(transaction, f"V{i}") for i in range(1, 29)}
-        
+
+        # --- Business metrics ---
+        FRAUD_PREDICTIONS.labels(
+            result="fraud" if is_fraud else "normal"
+        ).inc()
+        FRAUD_PROBABILITY.observe(prob)
+
+        message = (
+            "ALERT: Suspicious Transaction (Fraud likely)!"
+            if is_fraud
+            else "Transaction Normal."
+        )
+
+        # --- Persist to PostgreSQL ---
+        features_dict = {
+            f"V{i}": getattr(transaction, f"V{i}") for i in range(1, 29)
+        }
+
         db_record = TransactionRecord(
             time=transaction.Time,
             amount=transaction.Amount,
             features=features_dict,
             is_fraud=is_fraud,
             fraud_probability=prob,
-            model_version="1.0.0"
+            model_version="1.0.0",
         )
-        
         db.add(db_record)
         db.commit()
         db.refresh(db_record)
-        # ---------------------------------------------
-        
+
         return PredictionOutput(
             transaction_time=transaction.Time,
             transaction_amount=transaction.Amount,
             is_fraud=is_fraud,
             fraud_probability=prob,
-            message=message
+            message=message,
         )
-        
-    except Exception as e:
-        logger.error(f"Erreur lors de la prédiction: {e}")
-        raise HTTPException(status_code=500, detail=f"Erreur interne lors de l'inférence: {str(e)}")
+
+    except Exception as exc:
+        logger.error("Prediction error: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal inference error: {exc}",
+        ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Standalone execution (development only)
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8001)

@@ -372,12 +372,3 @@ Ajouter :
 * Shadow Testing
 
 ---
-
-Si tu veux maintenant, je peux :
-
-* Te donner une roadmap d’apprentissage structurée sur 6 semaines
-* Te détailler uniquement la partie drift au niveau mathématique
-* Te transformer ça en projet portfolio prêt CV AI Engineer
-* Ou te montrer comment l’expliquer en entretien technique
-
-Dis-moi ton objectif précis.

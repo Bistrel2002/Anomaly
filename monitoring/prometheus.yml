@@ -1,0 +1,25 @@
+# Step 6 — Prometheus configuration
+# Scrapes metrics exposed by the FastAPI application every 15 seconds.
+
+global:
+  scrape_interval: 15s          # How often to collect metrics
+  evaluation_interval: 15s      # How often to evaluate alerting rules
+
+scrape_configs:
+  # Fraud Detection API metrics
+  - job_name: "fraud-detection-api"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8000"]
+        labels:
+          app: "fraud-detection"
+          env: "production"
+
+  # CPU / memory metrics per Docker container
+  - job_name: "cadvisor"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["cadvisor:8080"]
+        labels:
+          app: "fraud-detection"
+          env: "production"

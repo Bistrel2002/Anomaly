@@ -1,66 +1,99 @@
+"""Fraud detection model wrapper for real-time inference.
+
+This module encapsulates the trained Random Forest classifier and its
+associated RobustScaler.  It loads the serialised ``.joblib`` artefacts
+from disk and provides a single ``predict()`` method that transforms a
+validated Pydantic input into the feature vector expected by the model.
+
+Pipeline step: Step 4 – Model serving / inference.
+"""
+
 import os
+
 import joblib
-import pandas as pd
 import numpy as np
+
 from app.schemas import TransactionInput
 
-# ÉTAPE 4 — Serveur Backend / Inférence du modèle
-# Fichier qui gère l'intelligence artificielle proprement dite (machine learning logic)
 
 class FraudDetector:
-    def __init__(self):
-        # Trouve le chemin vers le dossier actuel 'app/' pour éviter les bugs de chemin relatif
+    """Wrapper around the serialised Random Forest fraud-detection model.
+
+    On instantiation the class loads two artefacts from the ``app/``
+    directory:
+        * ``random_forest_fraud_model.joblib`` – trained classifier.
+        * ``robust_scaler.joblib`` – RobustScaler fitted during training.
+
+    Attributes:
+        model: The scikit-learn ``RandomForestClassifier`` instance, or
+            ``None`` if loading failed.
+        scaler: The scikit-learn ``RobustScaler`` instance, or ``None``
+            if loading failed.
+    """
+
+    def __init__(self) -> None:
+        """Load the model and scaler from the ``app/`` directory."""
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        # Construit les chemins complets vers les fichiers d'intelligence artificielle
-        model_path = os.path.join(current_dir, 'random_forest_fraud_model.joblib')
-        scaler_path = os.path.join(current_dir, 'robust_scaler.joblib')
-        
+        model_path = os.path.join(current_dir, "random_forest_fraud_model.joblib")
+        scaler_path = os.path.join(current_dir, "robust_scaler.joblib")
+
         try:
-            # Réveille le modèle Random Forest et le RobustScaler
             self.model = joblib.load(model_path)
             self.scaler = joblib.load(scaler_path)
-        except FileNotFoundError as e:
-            print(f"❌ ERREUR: Fichier .joblib introuvable. Détails: {e}")
+        except FileNotFoundError as exc:
+            print(f"ERROR: .joblib artefact not found – {exc}")
             self.model = None
             self.scaler = None
 
     def predict(self, transaction: TransactionInput) -> dict:
-        # Sécurité: empêche de prédire si l'initialisation a échoué
-        if self.model is None or self.scaler is None:
-            raise RuntimeError("Le modèle ML ou le Scaler n'est pas chargé.")
+        """Run fraud inference on a single transaction.
 
-        # Transforme l'objet Pydantic sécurisé en dictionnaire Python classique
+        The method replicates the exact preprocessing applied during
+        training:
+            1. Scale ``Amount`` and ``Time`` with the RobustScaler.
+            2. Concatenate the scaled values with the 28 PCA features
+               (V1–V28) in the correct column order.
+            3. Feed the resulting 30-dimensional vector to the Random
+               Forest for classification.
+
+        Args:
+            transaction: A validated Pydantic ``TransactionInput``
+                object containing Time, V1–V28, and Amount.
+
+        Returns:
+            dict: A dictionary with two keys:
+                - ``is_fraud`` (bool): ``True`` if the model predicts
+                  fraud (class 1).
+                - ``fraud_probability`` (float): The model's estimated
+                  probability of fraud, rounded to four decimal places.
+
+        Raises:
+            RuntimeError: If the model or scaler failed to load during
+                initialisation.
+        """
+        if self.model is None or self.scaler is None:
+            raise RuntimeError("ML model or scaler is not loaded.")
+
         transaction_dict = transaction.model_dump()
-        
-        # Extrait les valeurs de Montant et de Temps
-        amount = transaction_dict['Amount']
-        time = transaction_dict['Time']
-        
-        # Applique l'échelle mathématique (Scaler) sur le Montant et le Temps, 
-        # comme on l'a fait pendant l'entraînement, pour que le modèle puisse les comprendre
+
+        amount = transaction_dict["Amount"]
+        time_val = transaction_dict["Time"]
+
+        # Apply the same scaling used during training.
         scaled_amount = self.scaler.transform(np.array([[amount]]))[0][0]
-        scaled_time = self.scaler.transform(np.array([[time]]))[0][0]
-        
-        # Construit le vecteur de features dans l'ordre exact attendu par le modèle
-        # (D'abord Amount et Time scalés)
+        scaled_time = self.scaler.transform(np.array([[time_val]]))[0][0]
+
+        # Build the feature vector: [scaled_amount, scaled_time, V1…V28].
         ordered_features = [scaled_amount, scaled_time]
-        
-        # (Ensuite les 28 variables V1 à V28)
         for v_num in range(1, 29):
-            ordered_features.append(transaction_dict[f'V{v_num}'])
-            
-        # Convertit la liste en un vecteur NumPy ultra-rapide
+            ordered_features.append(transaction_dict[f"V{v_num}"])
+
         final_array = np.array([ordered_features])
-        
-        # Le modèle prend sa décision (0 = Normal, 1 = Fraude)
+
         is_fraud_pred = self.model.predict(final_array)[0]
-        
-        # Le modèle calcule son propre pourcentage de certitude (ex: 0.9812 pour Fraude)
         fraud_probability = self.model.predict_proba(final_array)[0][1]
-        
-        # Formate la réponse propre (Vrai/Faux) et probabilité arrondie à renvoyer à l'API
+
         return {
             "is_fraud": bool(is_fraud_pred),
-            "fraud_probability": round(float(fraud_probability), 4)
+            "fraud_probability": round(float(fraud_probability), 4),
         }

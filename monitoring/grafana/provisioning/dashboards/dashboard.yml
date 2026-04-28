@@ -1,0 +1,15 @@
+# ÉTAPE 6 — Auto-provisioning des dashboards Grafana
+# Grafana chargera automatiquement les fichiers JSON de dashboards au démarrage
+
+apiVersion: 1
+
+providers:
+  - name: "default"
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards    # Chemin dans le container
+      foldersFromFilesStructure: false
