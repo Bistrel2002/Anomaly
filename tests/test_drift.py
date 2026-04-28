@@ -9,6 +9,8 @@ import pytest
 
 from app.drift import DriftDetector, FEATURES
 from scripts.generate_baseline import generate_baseline
+from fastapi.testclient import TestClient
+from app.main import app as fastapi_app
 
 _ALL_COLS = [f"V{i}" for i in range(1, 29)] + ["Amount", "Time", "Class"]
 
@@ -33,14 +35,12 @@ def test_generate_baseline_creates_file(tmp_path):
         assert f in loaded
         assert len(loaded[f]) == 50
 
-
 def _make_baseline_pkl(tmp_path, n: int = 500) -> str:
     rng = np.random.default_rng(42)
     baseline = {f: rng.normal(0, 1, n) for f in FEATURES}
     pkl = str(tmp_path / "baseline.pkl")
     joblib.dump(baseline, pkl)
     return pkl
-
 
 def _make_records(baseline: dict, n: int = 150) -> list[dict]:
     rng = np.random.default_rng(42)
@@ -106,9 +106,6 @@ def test_drift_endpoint_not_checked_yet(monkeypatch):
     import app.drift as drift_module
     monkeypatch.setattr(drift_module, "DRIFT_STATUS", {})
 
-    from fastapi.testclient import TestClient
-    from app.main import app as fastapi_app
-
     client = TestClient(fastapi_app)
     response = client.get("/drift")
     assert response.status_code == 200
@@ -129,9 +126,6 @@ def test_drift_endpoint_returns_full_status(monkeypatch):
         "last_checked_at": "2026-04-28T12:00:00+00:00",
     }
     monkeypatch.setattr(drift_module, "DRIFT_STATUS", fake_status)
-
-    from fastapi.testclient import TestClient
-    from app.main import app as fastapi_app
 
     client = TestClient(fastapi_app)
     response = client.get("/drift")

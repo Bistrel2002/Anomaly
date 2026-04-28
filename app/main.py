@@ -107,17 +107,21 @@ async def lifespan(app: FastAPI):
         logger.error("Database connection error: %s", exc)
 
     logger.info("Initialising drift detector…")
-    drift_detector = DriftDetector()
-    if drift_detector.is_ready:
-        logger.info("Drift detector ready.")
-    else:
-        logger.warning("Drift baseline not found — drift detection disabled.")
+    try:
+        drift_detector = DriftDetector()
+        if drift_detector.is_ready:
+            logger.info("Drift detector ready.")
+        else:
+            logger.warning("Drift baseline not found — drift detection disabled.")
+    except Exception as exc:
+        logger.error("Failed to initialise drift detector: %s", exc)
 
     yield
 
-    # Shutdown: release model memory.
+    # Shutdown: release resources.
     fraud_detector = None
     drift_detector = None
+    _prediction_count = 0
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +186,7 @@ async def predict_fraud(
         HTTPException 500: If an unexpected error occurs during inference.
     """
     global fraud_detector  # noqa: PLW0603
+    global _prediction_count  # noqa: PLW0603
 
     if fraud_detector is None or fraud_detector.model is None:
         raise HTTPException(
@@ -215,6 +220,7 @@ async def predict_fraud(
         features_dict = {
             f"V{i}": getattr(transaction, f"V{i}") for i in range(1, 29)
         }
+        features_dict["Amount"] = transaction.Amount
 
         db_record = TransactionRecord(
             time=transaction.Time,
@@ -229,29 +235,31 @@ async def predict_fraud(
         db.refresh(db_record)
 
         # Drift detection trigger: every DRIFT_WINDOW predictions
-        global _prediction_count  # noqa: PLW0603
         with _count_lock:
             _prediction_count += 1
             should_check = _prediction_count >= DRIFT_WINDOW
             if should_check:
                 _prediction_count = 0
 
-        if should_check and drift_detector is not None and drift_detector.is_ready:
-            recent = (
-                db.query(TransactionRecord)
-                .order_by(TransactionRecord.id.desc())
-                .limit(DRIFT_WINDOW)
-                .all()
-            )
-            drift_results = drift_detector.compute_drift(
-                [r.features for r in recent]
-            )
-            if "results" in drift_results:
-                for feat, info in drift_results["results"].items():
-                    if "drift_detected" in info:
-                        DATA_DRIFT_DETECTED.labels(feature=feat).set(
-                            1 if info["drift_detected"] else 0
-                        )
+        try:
+            if should_check and drift_detector is not None and drift_detector.is_ready:
+                recent = (
+                    db.query(TransactionRecord)
+                    .order_by(TransactionRecord.id.desc())
+                    .limit(DRIFT_WINDOW)
+                    .all()
+                )
+                drift_results = drift_detector.compute_drift(
+                    [r.features for r in recent]
+                )
+                if "results" in drift_results:
+                    for feat, info in drift_results["results"].items():
+                        if "drift_detected" in info:
+                            DATA_DRIFT_DETECTED.labels(feature=feat).set(
+                                1 if info["drift_detected"] else 0
+                            )
+        except Exception as drift_exc:
+            logger.error("Drift computation error (non-fatal): %s", drift_exc)
 
         return PredictionOutput(
             transaction_time=transaction.Time,
