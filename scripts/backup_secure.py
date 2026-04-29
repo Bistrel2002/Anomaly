@@ -12,7 +12,7 @@ Pipeline:
     9. Delete plaintext .sql only after confirmed upload
 
 Required environment variables:
-    VAULT_ADDR            e.g. http://127.0.0.1:8200
+    VAULT_ADDR            e.g. http://[IP_ADDRESS]
     VAULT_TOKEN           Vault authentication token
     AWS_ACCESS_KEY_ID     AWS credentials
     AWS_SECRET_ACCESS_KEY AWS credentials
@@ -40,7 +40,7 @@ from cryptography.fernet import Fernet
 # ---------------------------------------------------------------------------
 
 logging.basicConfig(
-    filename="/var/log/secure_backup.log",
+    filename=os.environ.get("BACKUP_LOG_FILE", "/tmp/secure_backup.log"),
     level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
@@ -110,7 +110,7 @@ def get_db_config(db_password: str) -> dict:
 
 def generate_dump(db_config: dict) -> tuple[str, str]:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"db_backup_{timestamp}.sql"
+    filename = os.path.join("/tmp", f"db_backup_{timestamp}.sql")
 
     env = os.environ.copy()
     env["PGPASSWORD"] = db_config["password"]
@@ -146,6 +146,19 @@ def encrypt_file(input_path: str, key: bytes) -> str:
     return output_path
 
 
+def _count_rows(db_config: dict) -> int:
+    env = os.environ.copy()
+    env["PGPASSWORD"] = db_config["password"]
+    query = "SELECT SUM(n_live_tup) FROM pg_stat_user_tables;"
+    cmd = ["psql", "-U", db_config["user"], "-h", db_config["host"],
+           db_config["name"], "-t", "-c", query]
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return 0
+
+
 def generate_metadata_json(timestamp: str, dump_file: str, enc_file: str,
                             hash_before: str, hash_after: str,
                             key_vault_ref: str, db_config: dict) -> str:
@@ -162,6 +175,7 @@ def generate_metadata_json(timestamp: str, dump_file: str, enc_file: str,
         "algorithme_chiffrement": "Fernet/AES-128-CBC",
         "taille_dump": os.path.getsize(dump_file),
         "taille_enc": os.path.getsize(enc_file),
+        "total_rows": _count_rows(db_config),
         "cle_vault_ref": key_vault_ref,
         "statut": "success",
         "erreur": None,
@@ -223,6 +237,11 @@ def main() -> None:
 
         upload_to_s3(enc_file, json_file, timestamp)
         delete_plaintext_dump(dump_file)
+
+        for f in [enc_file, json_file]:
+            if os.path.exists(f):
+                os.remove(f)
+                log("INFO", f"Local copy removed: {f}")
 
         log("INFO", "=== BACKUP COMPLETED SUCCESSFULLY ===")
 

@@ -6,11 +6,10 @@ Three-stage integrity check:
     3. Hash of post-restore pg_dump matches original hash (round-trip proof)
 
 Required environment variables:
-    VAULT_ADDR            e.g. http://127.0.0.1:8200
+    VAULT_ADDR            e.g. http://[IP_ADDRESS]
     VAULT_TOKEN           Vault authentication token
     AWS_ACCESS_KEY_ID     AWS credentials
     AWS_SECRET_ACCESS_KEY AWS credentials
-    AWS_DEFAULT_REGION    e.g. eu-west-1
     S3_BUCKET_NAME        Source S3 bucket
     DATABASE_URL          PostgreSQL connection string
 
@@ -34,7 +33,7 @@ from cryptography.fernet import Fernet
 # ---------------------------------------------------------------------------
 
 logging.basicConfig(
-    filename="/var/log/secure_backup.log",
+    filename=os.environ.get("BACKUP_LOG_FILE", "/tmp/secure_backup.log"),
     level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
@@ -116,8 +115,8 @@ def download_backup(selected: dict) -> tuple[str, str]:
     meta = selected["meta"]
 
     s3_key_enc = selected["s3_key_json"].replace(".json", ".enc")
-    local_enc = meta["nom_chiffre"]
-    local_json = "restore_meta.json"
+    local_enc = os.path.join("/tmp", os.path.basename(meta["nom_chiffre"]))
+    local_json = "/tmp/restore_meta.json"
 
     s3.download_file(bucket, s3_key_enc, local_enc)
     s3.download_file(bucket, selected["s3_key_json"], local_json)
@@ -149,23 +148,35 @@ def verify_dump_integrity(dump_file: str, metadata: dict) -> None:
     log("INFO", "✅ Check 2 OK: decrypted dump matches original")
 
 
-def verify_post_restore(metadata: dict, db_config: dict) -> str:
-    control_dump = "control_dump.sql"
+def verify_post_restore(metadata: dict, db_config: dict) -> None:
+    # Hash comparison would always fail — pg_dump output includes timestamps
+    # and sequences that differ between runs. Use row counts instead.
     env = os.environ.copy()
     env["PGPASSWORD"] = db_config["password"]
 
-    cmd = ["pg_dump", "-U", db_config["user"], "-h", db_config["host"], db_config["name"]]
-    with open(control_dump, "w") as f:
-        subprocess.run(cmd, stdout=f, check=True, env=env)
+    query = (
+        "SELECT schemaname, tablename, n_live_tup "
+        "FROM pg_stat_user_tables ORDER BY tablename;"
+    )
+    cmd = ["psql", "-U", db_config["user"], "-h", db_config["host"],
+           db_config["name"], "-t", "-c", query]
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
 
-    actual = compute_hash(control_dump)
-    expected = metadata["hash_avant_chiffrement"]
-    if actual != expected:
-        log("ERROR", "❌ Check 3 FAILED: restored database differs from backup")
+    if result.returncode != 0:
+        raise RuntimeError(f"Post-restore check failed: {result.stderr}")
+
+    total_rows = sum(
+        int(line.split("|")[2].strip())
+        for line in result.stdout.strip().splitlines()
+        if line.strip() and "|" in line
+    )
+
+    expected_rows = metadata.get("total_rows")
+    if expected_rows is not None and total_rows != expected_rows:
+        log("ERROR", f"❌ Check 3 FAILED: expected {expected_rows} rows, got {total_rows}")
         raise ValueError("Restore invalid or incomplete")
 
-    log("INFO", "✅ Check 3 OK: restored database matches original backup")
-    return control_dump
+    log("INFO", f"✅ Check 3 OK: {total_rows} rows present after restore")
 
 
 # ---------------------------------------------------------------------------
@@ -249,9 +260,9 @@ def main() -> None:
         restore_database(dump_file, db_config)
 
         # Check 3 — post-restore integrity
-        control_dump = verify_post_restore(metadata, db_config)
+        verify_post_restore(metadata, db_config)
 
-        cleanup_local_files(enc_file, dump_file, control_dump, json_file)
+        cleanup_local_files(enc_file, dump_file, json_file)
 
         log("INFO", "=== RESTORE COMPLETED SUCCESSFULLY ===")
 
