@@ -53,7 +53,6 @@ services:
     container_name: anomaly_minio
     command: server /data --console-address ":9001"
     ports:
-      - "9002:9000"
       - "9003:9001"
     environment:
       MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID}
@@ -66,6 +65,41 @@ services:
       timeout: 3s
       retries: 10
     restart: always
+
+  # --- Vault init: store DB password once on first start ---
+  vault-init:
+    image: hashicorp/vault:latest
+    container_name: anomaly_vault_init
+    environment:
+      VAULT_ADDR: http://vault:8201
+      VAULT_TOKEN: ${VAULT_TOKEN}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SKIP_SETCAP: "true"
+    command: >
+      sh -c "vault kv put secret/database/prod password=$$POSTGRES_PASSWORD"
+    depends_on:
+      vault:
+        condition: service_healthy
+    restart: "no"
+
+  # --- MinIO init: create backup bucket once on first start ---
+  minio-init:
+    image: minio/mc:latest
+    container_name: anomaly_minio_init
+    environment:
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+    entrypoint: >
+      sh -c "
+        mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
+        mc mb --ignore-existing local/$$S3_BUCKET_NAME &&
+        echo 'Bucket ready.'
+      "
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
 
   # --- Secure backup (runs every 2 hours) ---
   backup:
@@ -86,10 +120,10 @@ services:
       S3_BUCKET_NAME: ${S3_BUCKET_NAME}
       AWS_ENDPOINT_URL: http://minio:9000
     depends_on:
-      vault:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
       db:
         condition: service_started
     restart: always
