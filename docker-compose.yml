@@ -28,10 +28,11 @@ services:
       - db
     restart: always
 
-  # --- HashiCorp Vault (secrets manager) ---
+  # --- HashiCorp Vault (secrets manager — dev mode) ---
   vault:
     image: hashicorp/vault:latest
     container_name: anomaly_vault
+    command: vault server -dev
     ports:
       - "8200:8200"
     environment:
@@ -39,23 +40,31 @@ services:
       VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
     cap_add:
       - IPC_LOCK
-    volumes:
-      - vault_data:/vault/data
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     restart: always
 
   # --- MinIO (S3-compatible object storage) ---
   minio:
     image: minio/minio:latest
     container_name: anomaly_minio
+    command: server /data --console-address ":9001"
     ports:
       - "9000:9000"
       - "9001:9001"
     environment:
       MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID}
       MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY}
-    command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     restart: always
 
   # --- Secure backup (runs every 2 hours) ---
@@ -77,9 +86,12 @@ services:
       S3_BUCKET_NAME: ${S3_BUCKET_NAME}
       AWS_ENDPOINT_URL: http://minio:9000
     depends_on:
-      - db
-      - vault
-      - minio
+      vault:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      db:
+        condition: service_started
     restart: always
 
   # --- cAdvisor (CPU / Mémoire des containers Docker) ---
@@ -133,5 +145,4 @@ volumes:
   postgres_data:
   prometheus_data:
   grafana_data:
-  vault_data:
   minio_data:
