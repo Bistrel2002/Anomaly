@@ -6,39 +6,33 @@ A production-grade MLOps pipeline that receives credit-card transactions in real
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        CLIENT / TEST                            │
-│              POST /predict  |  POST /predict/batch              │
-└────────────────────────────┬────────────────────────────────────┘
+```text
+┌──────────────────────────────────────────────────────────────────────┐
+│                            CLIENT / TEST                             │
+│                 POST /predict   |   POST /predict/batch              │
+└────────────────────────────┬─────────────────────────────────────────┘
                              │
-                    ┌────────▼────────┐
-                    │   FastAPI API   │  
-                    │  (inference +   │
-                    │   REST layer)   │
-                    └──┬──────────┬───┘
-                       │          │
-              ┌────────▼──┐  ┌────▼────────┐
-              │ PostgreSQL│  │  Prometheus │  
-              │           │  │  (metrics)  │
-              └───────────┘  └──────┬──────┘
-                                    │
-                             ┌──────▼──────┐
-                             │   Grafana   │  
-                             │ (dashboards)│
-                             └─────────────┘
-
-┌─────────────────────────────────────────────────────────────────┐
-│                     SECURITY LAYER                              │
-│                                                                 │
-│   HashiCorp Vault      ←──     All secrets (DB, MinIO, keys)    │
-│          │                                                      │
-│   ┌──────▼──────┐    ┌─────────────────────────────────────┐    │
-│   │  backup     │    │  MinIO (S3) :                       │    │
-│   │  container  │───►│  Encrypted .enc + metadata .json    │    │
-│   │  (cron/2min)│    │  backups/YYYY/MM/DD/                │    │
-│   └─────────────┘    └─────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────┘
+                    ┌────────▼────────┐        Fetch Secrets
+                    │   FastAPI API   │◄─────────────────────────┐
+                    │  (ML Inference) │                          │
+                    └───┬──────────┬──┘                          │
+              Write     │          │ Metrics                     │
+           ┌────────────▼┐   ┌─────▼────────┐            ┌───────┴───────┐
+           │ PostgreSQL  │   │  Prometheus  │            │               │
+           │  (Storage)  │   │  (Monitoring)│            │   HashiCorp   │
+           └────┬────────┘   └──────┬───────┘            │     Vault     │
+                │                   │                    │ (Secrets Hub) │
+           Read │            ┌──────▼───────┐            │               │
+           ┌────▼────────┐   │   Grafana    │            └───────┬───────┘
+           │   Backup    │   │ (Dashboards) │                    │
+           │ Cron Job    │   └──────────────┘                    │
+           └────┬────────┘                                       │
+                │ Encrypt & Upload                   Fetch Keys  │
+                ├────────────────────────────────────────────────┘
+           ┌────▼────────┐
+           │ MinIO (S3)  │
+           │ (Archives)  │
+           └─────────────┘
 ```
 
 ---
@@ -119,23 +113,37 @@ git clone https://github.com/Bistrel2002/anomaly.git
 cd anomaly
 ```
 
-### 2. Create your environment file
+### 2. Prerequisites
+
+Ensure you have the following installed on your machine:
+- **Docker** & **Docker Compose**
+- **Git**
+- **Python 3.10+** (optional, for running local test scripts)
+
+### 3. Create your environment file
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your values. The only secrets you need to set are:
+Edit the `.env` file. You **MUST** define these 4 core passwords/keys for the infrastructure to bootstrap securely:
 
 ```env
-POSTGRES_PASSWORD=your_password
-VAULT_TOKEN=your_vault_token
-AWS_ACCESS_KEY_ID=your_minio_user
-AWS_SECRET_ACCESS_KEY=your_minio_password
+# 1. Database password
+POSTGRES_PASSWORD=your_secure_db_password
+
+# 2. Vault Master Token (to unlock the secrets hub)
+VAULT_TOKEN=your_secure_vault_token
+
+# 3. MinIO (S3) Storage Credentials
+AWS_ACCESS_KEY_ID=your_minio_admin_user
+AWS_SECRET_ACCESS_KEY=your_minio_admin_password
+
+# 4. Grafana Admin Password
 GF_ADMIN_PASSWORD=your_grafana_password
 ```
 
-Everything else (DATABASE_URL, MinIO credentials) will be automatically stored in Vault at first boot and retrieved from there at runtime.
+> **Note:** Do NOT worry about configuring `DATABASE_URL` manually. The `vault-init` container will automatically construct it and store it safely in Vault along with your MinIO credentials during the first boot!
 
 ### 3. Start the full stack
 
@@ -149,11 +157,8 @@ On first boot, two init containers run automatically:
 
 ### 4. Verify everything is running
 
-```bash
-docker ps
-```
 
-Expected containers: `anomaly_api`, `anomaly_postgres`, `anomaly_vault`, `anomaly_minio`, `anomaly_backup`, `anomaly_prometheus`, `anomaly_grafana`, `anomaly_cadvisor`
+Expected containers: `anomaly_api`, `anomaly_postgres`, `anomaly_vault`, `anomaly_minio`, `anomaly_prometheus`, `anomaly_grafana`, `anomaly_cadvisor`
 
 ---
 
@@ -181,21 +186,41 @@ GET /
 
 ### Single transaction prediction
 
-```
-POST /predict
-Content-Type: application/json
+Test your API by sending a POST request to the `/predict` endpoint with a JSON body containing the transaction details.
 
+```bash
 {
   "Time": 406.0,
-  "V1": -2.31, "V2": 1.95, "V3": -1.60, "V4": 3.99,
-  "V5": -0.52, "V6": -1.42, "V7": -2.53, "V8": 1.39,
-  "V9": -2.77, "V10": -2.77, "V11": 3.20, "V12": -2.89,
-  "V13": -0.59, "V14": -4.28, "V15": 0.38, "V16": -1.14,
-  "V17": -2.83, "V18": -0.01, "V19": 0.41, "V20": 0.12,
-  "V21": 0.51, "V22": -0.03, "V23": -0.46, "V24": 0.32,
-  "V25": 0.04, "V26": 0.17, "V27": 0.26, "V28": -0.14,
+  "V1": -2.3122, 
+  "V2": 1.9519, 
+  "V3": -1.6098, 
+  "V4": 3.9979,
+  "V5": -0.5221,
+  "V6": -1.4265, 
+  "V7": -2.5373, 
+  "V8": 1.3916,
+  "V9": -2.7700, 
+  "V10": -2.7722, 
+  "V11": 3.2020, 
+  "V12": -2.8999,
+  "V13": -0.5952, 
+  "V14": -4.2892, 
+  "V15": 0.3897, 
+  "V16": -1.1407,
+  "V17": -2.8300, 
+  "V18": -0.0168, 
+  "V19": 0.4169, 
+  "V20": 0.1269,
+  "V21": 0.5172, 
+  "V22": -0.0350, 
+  "V23": -0.4652, 
+  "V24": 0.3201,
+  "V25": 0.0445, 
+  "V26": 0.1778, 
+  "V27": 0.2611, 
+  "V28": -0.1432,
   "Amount": 0.0
-}
+}'
 ```
 
 Response:
@@ -245,13 +270,6 @@ All secrets are managed exclusively by HashiCorp Vault. Services only need `VAUL
 | `secret/minio/prod` | MinIO access key + secret key |
 | `secret/backup/symmetric_key` | Fernet AES-128-CBC encryption key |
 
-### Verify Vault contents
-
-```bash
-docker exec anomaly_vault sh -c \
-  "VAULT_ADDR=http://127.0.0.1:8201 VAULT_TOKEN=root vault kv list secret/"
-```
-
 ---
 
 ## Automated Backups
@@ -277,25 +295,6 @@ The backup container runs `backup_secure.py` every 2 minutes via cron.
 docker exec anomaly_backup sh -c "cd /code && python scripts/backup_secure.py"
 ```
 
-### Check backup files in MinIO
-
-```bash
-docker run --rm --network anomaly_default --entrypoint sh minio/mc \
-  -c "mc alias set local http://minio:9000 minioadmin minioadmin 2>/dev/null \
-      && mc ls --recursive local/anomaly-backups/"
-```
-
-### Restore a backup
-
-```bash
-docker exec -it anomaly_backup sh -c "cd /code && python scripts/restore_secure.py"
-```
-
-The restore script performs 3 integrity checks:
-1. Hash of downloaded `.enc` must match `hash_apres_chiffrement` from JSON
-2. Hash of decrypted `.sql` must match `hash_avant_chiffrement` from JSON
-3. Row count after restore must match the row count snapshot from backup time
-
 ---
 
 ## Monitoring
@@ -318,7 +317,8 @@ The Fraud Detection dashboard is pre-provisioned and shows:
 - Prediction rate (fraud vs normal)
 - Fraud probability distribution
 - API latency
-- Container CPU and memory via cAdvisor
+- Latency ML prediction
+- Data drift detection status
 
 ---
 
@@ -362,29 +362,9 @@ docker exec anomaly_api pytest tests/ -v
 GitHub Actions runs on every push to `main`:
 
 1. **Test** — runs `pytest` against the full test suite
-2. **Build & Push** — builds the Docker image and pushes to GitHub Container Registry (GHCR) as `ghcr.io/<username>/anomaly:latest`
+2. **Build & Push** — builds the Docker image and pushes to GitHub
 
 The workflow file is at `.github/workflows/ci.yml`.
-
----
-
-## Environment Variables Reference
-
-| Variable | Used by | Description |
-|---|---|---|
-| `POSTGRES_USER` | PostgreSQL container | Database user |
-| `POSTGRES_PASSWORD` | PostgreSQL + vault-init | Database password (also stored in Vault) |
-| `POSTGRES_DB` | PostgreSQL container | Database name |
-| `DATABASE_URL` | vault-init only | Full connection URL (stored in Vault, not used by API directly) |
-| `VAULT_ADDR` | All services | Vault server address |
-| `VAULT_TOKEN` | All services | Vault authentication token |
-| `AWS_ACCESS_KEY_ID` | MinIO + vault-init | MinIO root user (also stored in Vault) |
-| `AWS_SECRET_ACCESS_KEY` | MinIO + vault-init | MinIO root password (also stored in Vault) |
-| `AWS_DEFAULT_REGION` | backup/restore | S3 region (use `us-east-1` for MinIO) |
-| `AWS_ENDPOINT_URL` | backup/restore | MinIO internal endpoint (`http://minio:9000`) |
-| `S3_BUCKET_NAME` | backup/restore | Target bucket name |
-| `GF_ADMIN_USER` | Grafana | Admin username |
-| `GF_ADMIN_PASSWORD` | Grafana | Admin password |
 
 ---
 
