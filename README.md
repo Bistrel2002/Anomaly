@@ -12,23 +12,24 @@ A production-grade MLOps pipeline that receives credit-card transactions in real
 │                 POST /predict   |   POST /predict/batch              │
 └────────────────────────────┬─────────────────────────────────────────┘
                              │
-                    ┌────────▼────────┐        Fetch Secrets
-                    │   FastAPI API   │◄─────────────────────────┐
-                    │  (ML Inference) │                          │
-                    └───┬──────────┬──┘                          │
-              Write     │          │ Metrics                     │
-           ┌────────────▼┐   ┌─────▼────────┐            ┌───────┴───────┐
-           │ PostgreSQL  │   │  Prometheus  │            │               │
-           │  (Storage)  │   │  (Monitoring)│            │   HashiCorp   │
-           └────┬────────┘   └──────┬───────┘            │     Vault     │
-                │                   │                    │ (Secrets Hub) │
-           Read │            ┌──────▼───────┐            │               │
-           ┌────▼────────┐   │   Grafana    │            └───────┬───────┘
-           │   Backup    │   │ (Dashboards) │                    │
-           │ Cron Job    │   └──────────────┘                    │
-           └────┬────────┘                                       │
-                │ Encrypt & Upload                   Fetch Keys  │
-                ├────────────────────────────────────────────────┘
+                    ┌────────▼────────┐
+                    │   FastAPI API   │◄───────(Fetch DB Password)───────┐
+                    │  (ML Inference) │                                  │
+                    └───┬──────────┬──┘                                  │
+              Write     │          │ Metrics                             │
+           ┌────────────▼┐   ┌─────▼────────┐                    ┌───────┴───────┐
+           │ PostgreSQL  │   │  Prometheus  │                    │               │
+           │  (Storage)  │   │  (Monitoring)│                    │   HashiCorp   │
+           └────┬────────┘   └──────┬───────┘                    │     Vault     │
+                │                   │                            │               │
+                |                   │                            │ (Secrets Hub) │
+           Read │            ┌──────▼───────┐                    │               │
+           ┌────▼────────┐   │   Grafana    │                    └───────┬───────┘
+           │   Backup    │   │ (Dashboards) │                            │
+           │             │   │──────────────│                            │
+           │ Cron Job    │◄──────(Fetch DB Password & MinIO Keys)────────┘
+           └────┬────────┘
+                │ Encrypt & Upload
            ┌────▼────────┐
            │ MinIO (S3)  │
            │ (Archives)  │
