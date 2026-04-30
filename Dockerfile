@@ -9,7 +9,11 @@ WORKDIR /code
 # Install postgresql-client for pg_dump / psql used by backup scripts
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
+    cron \
     && rm -rf /var/lib/apt/lists/*
+
+COPY cron/crontab /etc/cron.d/backup_secure
+RUN chmod 0644 /etc/cron.d/backup_secure && crontab /etc/cron.d/backup_secure
 
 # Copier et installer les dépendances en premier (cache Docker)
 COPY requirements.txt .

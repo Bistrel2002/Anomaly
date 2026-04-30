@@ -236,43 +236,53 @@ print("\nEDA and feature-engineering pipeline complete. Data is ready for traini
 # 9. Random Forest training
 # ---------------------------------------------------------------------------
 
-print("Training Random Forest (this may take a few minutes)...\n")
+print("Training Random Forest (this might take a few minutes)...\n")
 
 rf_clf = RandomForestClassifier(
-    n_estimators=200,
-    max_depth=40,
-    min_samples_split=35,
-    min_samples_leaf=15,
-    bootstrap=True,
-    random_state=42,
-    n_jobs=-1,
+    n_estimators=200,          # On double le nombre d'arbres (par défaut 100). Plus robuste, meilleure généralisation.
+    max_depth=40,              # On limite la profondeur à 40 niveaux. Un arbre illimité risque d'apprendre le "bruit" par cœur.
+    min_samples_split=10,      # Il faut au moins 10 transactions dans un nœud pour faire une division. Évite les règles trop spécifiques.
+    min_samples_leaf=5,        # Chaque feuille finale (décision) doit contenir au moins 5 transactions. Rend les prédictions plus stables.
+    bootstrap=True,            # Utilisation du bagging (tirer des sous-échantillons au hasard avec remplacement), garantit la diversité.
+    random_state=42,           # Pour que les résultats soient reproductibles à chaque fois que tu relances la cellule.
+    n_jobs=-1                  # Utilise tous les cœurs de ton processeur pour accélérer l'entraînement.
 )
+
+# On entraîne sur les données SMOTÉES (les 70% de départ)
 rf_clf.fit(X_train_sm, y_train_sm)
 
 # ---------------------------------------------------------------------------
 # 10. Evaluation on validation set (used during development)
 # ---------------------------------------------------------------------------
 
-print("\n" + "=" * 60)
-print("VALIDATION SET — unbiased estimate during development")
-print("=" * 60)
+print("\n--- ÉVALUATION SUR LE SET DE VALIDATION (15%) ---")
+# Vérification rapide sur le set de validation
 y_pred_val = rf_clf.predict(X_val)
 y_prob_val = rf_clf.predict_proba(X_val)[:, 1]
-
-print("\nConfusion Matrix:\n", confusion_matrix(y_val, y_pred_val))
-print("\nClassification Report:\n", classification_report(y_val, y_pred_val, target_names=["Normal", "Fraud"]))
-print(f"ROC-AUC Score: {roc_auc_score(y_val, y_prob_val):.4f}")
+print(f"ROC-AUC Validation Score: {roc_auc_score(y_val, y_prob_val):.4f}")
+print("Confusion Matrix (Validation):\n", confusion_matrix(y_val, y_pred_val))
 
 # ---------------------------------------------------------------------------
 # 11. Evaluation on test set (final holdout — touch only once)
 # ---------------------------------------------------------------------------
 
-print("\n" + "=" * 60)
-print("TEST SET — final unbiased evaluation (hold-out)")
-print("=" * 60)
-y_pred_rf = rf_clf.predict(X_test)
-y_prob_rf = rf_clf.predict_proba(X_test)[:, 1]
+print("\n--- ÉVALUATION FINALE SUR LE TEST SET (15%) ---")
+# L'évaluation finale et détaillée se fait sur le Test Set
+y_pred_test = rf_clf.predict(X_test)
+y_prob_test = rf_clf.predict_proba(X_test)[:, 1]
 
-print("\nConfusion Matrix:\n", confusion_matrix(y_test, y_pred_rf))
-print("\nClassification Report:\n", classification_report(y_test, y_pred_rf, target_names=["Normal", "Fraud"]))
-print(f"ROC-AUC Score: {roc_auc_score(y_test, y_prob_rf):.4f}")
+print(f"ROC-AUC Test Score: {roc_auc_score(y_test, y_prob_test):.4f}")
+print("\nConfusion Matrix (Test):\n", confusion_matrix(y_test, y_pred_test))
+print("\nClassification Report (Test):\n", classification_report(y_test, y_pred_test))
+
+# ---------------------------------------------------------------------------
+# 12. Save the trained model for the API
+# ---------------------------------------------------------------------------
+
+import joblib
+import os
+
+model_save_path = os.path.join(os.path.dirname(__file__), "..", "app", "random_forest_fraud_model.joblib")
+print(f"\nSaving the newly trained model to {model_save_path} ...")
+joblib.dump(rf_clf, model_save_path)
+print("Model saved successfully. The API will now use this new version!")

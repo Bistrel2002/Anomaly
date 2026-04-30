@@ -201,6 +201,54 @@
           "refId": "C"
         }
       ]
+    },
+    {
+      "title": "⚠️ ALERTE DATA DRIFT",
+      "description": "État de la dérive des données (si rouge, le modèle est obsolète)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "green", "index": 1, "text": "🟢 OK (Pas de dérive)" },
+                "1": { "color": "red", "index": 0, "text": "🚨 DÉRIVE DÉTECTÉE !" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [ "max" ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "max(data_drift_detected)",
+          "legendFormat": "Statut Drift",
+          "refId": "A"
+        }
+      ]
     }
   ],
   "refresh": "10s",

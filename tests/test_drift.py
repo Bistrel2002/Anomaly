@@ -137,3 +137,4 @@ def test_drift_endpoint_returns_full_status(monkeypatch):
     assert "last_checked_at" in data
     for f in FEATURES:
         assert f in data["results"]
+

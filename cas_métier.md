@@ -59,4 +59,4 @@ L'analyse de volume est basée sur notre dataset de référence `creditcard.csv`
 *   Volume par heure = 284 807 / 48 ≈ **5 933 transactions / heure**.
 *   **Volume par minute = ~99 transactions / minute en moyenne**.
 
-*(Note : Dans un environnement bancaire global réel au niveau de la passerelle, ce volume serait considérablement plus élevé, pouvant atteindre des milliers de transactions par seconde lors des pics. L'architecture technique MLOps conçue doit donc être capable de **scaler** dynamiquement pour absorber ces variations avec Kafka et un cluster Kubernetes)*.
+*(Note : Dans un environnement bancaire global réel au niveau de la passerelle, ce volume serait considérablement plus élevé, pouvant atteindre des milliers de transactions par seconde lors des pics. L'architecture technique MLOps conçue doit donc être capable de **scaler** dynamiquement pour absorber ces variations)*.

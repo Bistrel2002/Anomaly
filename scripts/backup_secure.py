@@ -34,6 +34,10 @@ from datetime import datetime
 import boto3
 import hvac
 from cryptography.fernet import Fernet
+from dotenv import load_dotenv
+
+# Charger automatiquement le fichier .env (utile pour les tests locaux)
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -71,6 +75,13 @@ def get_db_password_from_vault(vault_client: hvac.Client) -> str:
     return secret["data"]["data"]["password"]
 
 
+def get_minio_credentials(vault_client: hvac.Client) -> tuple[str, str]:
+    secret = vault_client.secrets.kv.read_secret_version(path="minio/prod")
+    data = secret["data"]["data"]
+    log("INFO", "MinIO credentials retrieved from Vault")
+    return data["access_key"], data["secret_key"]
+
+
 def get_or_create_symmetric_key(vault_client: hvac.Client) -> bytes:
     path = "backup/symmetric_key"
     try:
@@ -99,8 +110,10 @@ def get_db_config(db_password: str) -> dict:
     userinfo, hostinfo = without_scheme.split("@", 1)
     user = userinfo.split(":")[0]
     hostport, dbname = hostinfo.rsplit("/", 1)
-    host = hostport.split(":")[0]
-    return {"type": "postgresql", "user": user, "host": host,
+    host_parts = hostport.split(":")
+    host = host_parts[0]
+    port = host_parts[1] if len(host_parts) > 1 else "5432"
+    return {"type": "postgresql", "user": user, "host": host, "port": port,
             "name": dbname, "password": db_password}
 
 
@@ -115,7 +128,7 @@ def generate_dump(db_config: dict) -> tuple[str, str]:
     env = os.environ.copy()
     env["PGPASSWORD"] = db_config["password"]
 
-    cmd = ["pg_dump", "-U", db_config["user"], "-h", db_config["host"], db_config["name"]]
+    cmd = ["pg_dump", "-U", db_config["user"], "-h", db_config["host"], "-p", db_config["port"], db_config["name"]]
     with open(filename, "w") as f:
         result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, env=env)
 
@@ -150,7 +163,7 @@ def _count_rows(db_config: dict) -> int:
     env = os.environ.copy()
     env["PGPASSWORD"] = db_config["password"]
     query = "SELECT SUM(n_live_tup) FROM pg_stat_user_tables;"
-    cmd = ["psql", "-U", db_config["user"], "-h", db_config["host"],
+    cmd = ["psql", "-U", db_config["user"], "-h", db_config["host"], "-p", db_config["port"],
            db_config["name"], "-t", "-c", query]
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
     try:
@@ -187,9 +200,15 @@ def generate_metadata_json(timestamp: str, dump_file: str, enc_file: str,
     return json_file
 
 
-def upload_to_s3(enc_file: str, json_file: str, timestamp: str) -> None:
+def upload_to_s3(enc_file: str, json_file: str, timestamp: str,
+                 access_key: str, secret_key: str) -> None:
     endpoint = os.environ.get("AWS_ENDPOINT_URL")
-    s3 = boto3.client("s3", endpoint_url=endpoint)
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+    )
     bucket = os.environ["S3_BUCKET_NAME"]
     date_path = f"{timestamp[:4]}/{timestamp[4:6]}/{timestamp[6:8]}"
 
@@ -216,6 +235,7 @@ def main() -> None:
 
         vault_client = init_vault_client()
         db_password = get_db_password_from_vault(vault_client)
+        minio_access_key, minio_secret_key = get_minio_credentials(vault_client)
         key = get_or_create_symmetric_key(vault_client)
         key_vault_ref = "backup/symmetric_key"
 
@@ -235,7 +255,7 @@ def main() -> None:
             hash_before, hash_after, key_vault_ref, db_config,
         )
 
-        upload_to_s3(enc_file, json_file, timestamp)
+        upload_to_s3(enc_file, json_file, timestamp, minio_access_key, minio_secret_key)
         delete_plaintext_dump(dump_file)
 
         for f in [enc_file, json_file]:

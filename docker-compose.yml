@@ -23,9 +23,13 @@ services:
     ports:
       - "8001:8000"
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      VAULT_ADDR: http://vault:8201
+      VAULT_TOKEN: ${VAULT_TOKEN}
     depends_on:
-      - db
+      vault-init:
+        condition: service_completed_successfully
+      db:
+        condition: service_started
     restart: always
 
   # --- HashiCorp Vault (secrets manager — dev mode) ---
@@ -41,7 +45,7 @@ services:
       VAULT_API_ADDR: "http://0.0.0.0:8201"
       SKIP_SETCAP: "true"
     healthcheck:
-      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8201"]
+      test: [ "CMD", "vault", "status", "-address=http://127.0.0.1:8201" ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -60,13 +64,13 @@ services:
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: [ "CMD", "mc", "ready", "local" ]
       interval: 5s
       timeout: 3s
       retries: 10
     restart: always
 
-  # --- Vault init: store DB password once on first start ---
+  # --- Vault init: store ALL project secrets ---
   vault-init:
     image: hashicorp/vault:latest
     container_name: anomaly_vault_init
@@ -74,9 +78,16 @@ services:
       VAULT_ADDR: http://vault:8201
       VAULT_TOKEN: ${VAULT_TOKEN}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_URL: ${DATABASE_URL}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       SKIP_SETCAP: "true"
     command: >
-      sh -c "vault kv put secret/database/prod password=$$POSTGRES_PASSWORD"
+      sh -c "
+        vault kv put secret/database/prod password=$$POSTGRES_PASSWORD url=$$DATABASE_URL &&
+        vault kv put secret/minio/prod access_key=$$AWS_ACCESS_KEY_ID secret_key=$$AWS_SECRET_ACCESS_KEY &&
+        echo 'All secrets stored in Vault.'
+      "
     depends_on:
       vault:
         condition: service_healthy
@@ -101,24 +112,19 @@ services:
         condition: service_healthy
     restart: "no"
 
-  # --- Secure backup (runs every 2 hours) ---
+  # --- Secure backup (cron every 2 minutes) ---
   backup:
     build: .
     container_name: anomaly_backup
     command: >
-      sh -c "while true; do
-        python /code/scripts/backup_secure.py;
-        sleep 7200;
-      done"
+      sh -c "printenv | grep -E '^(VAULT_|S3_|AWS_ENDPOINT|AWS_DEFAULT|BACKUP_|DATABASE_URL)' >> /etc/environment && cron -f"
     environment:
-      DATABASE_URL: ${DATABASE_URL}
       VAULT_ADDR: http://vault:8201
       VAULT_TOKEN: ${VAULT_TOKEN}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      DATABASE_URL: ${DATABASE_URL}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
-      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
       AWS_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
     depends_on:
       vault-init:
         condition: service_completed_successfully

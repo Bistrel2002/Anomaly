@@ -67,24 +67,42 @@ def init_vault_client() -> hvac.Client:
     return client
 
 
-def get_db_config() -> dict:
-    url = os.environ["DATABASE_URL"]
+def get_db_config(vault_client: hvac.Client) -> dict:
+    secret = vault_client.secrets.kv.read_secret_version(path="database/prod")
+    data = secret["data"]["data"]
+    url = data["url"]
     without_scheme = url.split("://", 1)[1]
     userinfo, hostinfo = without_scheme.split("@", 1)
     user = userinfo.split(":")[0]
-    password = userinfo.split(":")[1] if ":" in userinfo else ""
+    password = data["password"]
     hostport, dbname = hostinfo.rsplit("/", 1)
     host = hostport.split(":")[0]
+    log("INFO", "Database config retrieved from Vault")
     return {"user": user, "host": host, "name": dbname, "password": password}
+
+
+def get_minio_credentials(vault_client: hvac.Client) -> tuple[str, str]:
+    secret = vault_client.secrets.kv.read_secret_version(path="minio/prod")
+    data = secret["data"]["data"]
+    log("INFO", "MinIO credentials retrieved from Vault")
+    return data["access_key"], data["secret_key"]
 
 
 # ---------------------------------------------------------------------------
 # S3 helpers
 # ---------------------------------------------------------------------------
 
-def list_available_backups() -> list[dict]:
-    endpoint = os.environ.get("AWS_ENDPOINT_URL")
-    s3 = boto3.client("s3", endpoint_url=endpoint)
+def _s3_client(access_key: str, secret_key: str):
+    return boto3.client(
+        "s3",
+        endpoint_url=os.environ.get("AWS_ENDPOINT_URL"),
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+    )
+
+
+def list_available_backups(access_key: str, secret_key: str) -> list[dict]:
+    s3 = _s3_client(access_key, secret_key)
     bucket = os.environ["S3_BUCKET_NAME"]
     response = s3.list_objects_v2(Bucket=bucket, Prefix="backups/")
 
@@ -108,9 +126,8 @@ def list_available_backups() -> list[dict]:
     return backups
 
 
-def download_backup(selected: dict) -> tuple[str, str]:
-    endpoint = os.environ.get("AWS_ENDPOINT_URL")
-    s3 = boto3.client("s3", endpoint_url=endpoint)
+def download_backup(selected: dict, access_key: str, secret_key: str) -> tuple[str, str]:
+    s3 = _s3_client(access_key, secret_key)
     bucket = os.environ["S3_BUCKET_NAME"]
     meta = selected["meta"]
 
@@ -149,8 +166,10 @@ def verify_dump_integrity(dump_file: str, metadata: dict) -> None:
 
 
 def verify_post_restore(metadata: dict, db_config: dict) -> None:
-    # Hash comparison would always fail — pg_dump output includes timestamps
-    # and sequences that differ between runs. Use row counts instead.
+    # pg_dump output is non-deterministic (timestamps, sequences, stats differ
+    # between runs), so hash comparison would always fail. Row count is a
+    # reliable proxy: if every table has the expected number of live rows, the
+    # restore is complete.
     env = os.environ.copy()
     env["PGPASSWORD"] = db_config["password"]
 
@@ -234,13 +253,17 @@ def main() -> None:
     try:
         log("INFO", "=== RESTORE START ===")
 
-        backups = list_available_backups()
+        vault_client = init_vault_client()
+        minio_access_key, minio_secret_key = get_minio_credentials(vault_client)
+        db_config = get_db_config(vault_client)
+
+        backups = list_available_backups(minio_access_key, minio_secret_key)
         if not backups:
             raise RuntimeError("No backups found in S3.")
         choice = int(input("\nYour choice (number): ")) - 1
         selected = backups[choice]
 
-        enc_file, json_file = download_backup(selected)
+        enc_file, json_file = download_backup(selected, minio_access_key, minio_secret_key)
         with open(json_file) as f:
             metadata = json.load(f)
 
@@ -248,7 +271,6 @@ def main() -> None:
         verify_enc_integrity(enc_file, metadata)
 
         # Decrypt
-        vault_client = init_vault_client()
         key = get_key_from_vault(vault_client, metadata["cle_vault_ref"])
         dump_file = decrypt_file(enc_file, key)
 
@@ -256,10 +278,9 @@ def main() -> None:
         verify_dump_integrity(dump_file, metadata)
 
         # Restore
-        db_config = get_db_config()
         restore_database(dump_file, db_config)
 
-        # Check 3 — post-restore integrity
+        # Check 3 — post-restore row count vs backup snapshot
         verify_post_restore(metadata, db_config)
 
         cleanup_local_files(enc_file, dump_file, json_file)

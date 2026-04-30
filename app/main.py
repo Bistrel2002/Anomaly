@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.database import Base, TransactionRecord, engine, get_db
 from app.model import FraudDetector
-from app.schemas import PredictionOutput, TransactionInput
+from app.schemas import BatchPredictionOutput, PredictionOutput, TransactionInput
 
 import app.drift as _drift_module
 from app.drift import DriftDetector, DRIFT_WINDOW
@@ -277,7 +277,6 @@ async def predict_fraud(
             status_code=500,
             detail=f"Internal inference error: {exc}",
         ) from exc
-
 
 @app.get("/drift")
 async def get_drift_status():

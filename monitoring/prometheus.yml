@@ -6,11 +6,21 @@ global:
   evaluation_interval: 15s      # How often to evaluate alerting rules
 
 scrape_configs:
-  # Fraud Detection API metrics
-  - job_name: "fraud-detection-api"
+  # Fraud Detection API metrics (Docker Local)
+  - job_name: "fraud-detection-api-local"
     metrics_path: /metrics
     static_configs:
       - targets: ["api:8000"]
+        labels:
+          app: "fraud-detection"
+          env: "local"
+
+  # Fraud Detection API metrics (Render Cloud)
+  - job_name: "fraud-detection-api-render"
+    metrics_path: /metrics
+    scheme: https   # Render utilise HTTPS par défaut
+    static_configs:
+      - targets: ["TON_URL_RENDER_SANS_HTTPS"] # Exemple: "mon-api.onrender.com"
         labels:
           app: "fraud-detection"
           env: "production"

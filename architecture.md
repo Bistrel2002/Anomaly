@@ -1,7 +1,3 @@
-Parfait. On va faire une **explication complète, structurée et professionnelle**, sans code, comme si tu devais concevoir ce projet pour un environnement industriel.
-
----
-
 # 🎯 Objectif du projet
 
 Construire une **pipeline MLOps de détection d’anomalies en temps réel** capable de :
@@ -12,8 +8,6 @@ Construire une **pipeline MLOps de détection d’anomalies en temps réel** cap
 4. Surveiller la performance du modèle
 5. Détecter la dérive des données (data drift)
 6. Générer des alertes automatiques
-
-Ce projet démontre que tu maîtrises le **cycle de vie complet d’un modèle ML en production**.
 
 ---
 
@@ -355,20 +349,3 @@ Tu montres que tu maîtrises :
 * Gestion du cycle de vie ML
 * Détection de dérive
 
-C’est un projet **niveau ingénieur ML production**, pas juste data scientist.
-
----
-
-# 📌 Version Niveau Expert (si tu veux aller plus loin)
-
-Ajouter :
-
-* Kafka pour vrai streaming
-* MLflow pour tracking
-* Airflow pour orchestration
-* Kubernetes pour scaling
-* Feature Store
-* Canary Deployment
-* Shadow Testing
-
----

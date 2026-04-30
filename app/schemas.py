@@ -56,6 +56,16 @@ class TransactionInput(BaseModel):
     Amount: float = Field(..., description="Transaction amount in original currency")
 
 
+class BatchPredictionOutput(BaseModel):
+    """Schema for a single result inside a batch prediction response."""
+
+    transaction_time: float
+    transaction_amount: float
+    is_fraud: bool
+    fraud_probability: float
+    message: str
+
+
 class PredictionOutput(BaseModel):
     """Schema for the prediction response returned by ``/predict``.
 

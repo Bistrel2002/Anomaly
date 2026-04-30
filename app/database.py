@@ -10,6 +10,7 @@ Pipeline step: Step 5 – PostgreSQL storage.
 import datetime
 import os
 
+import hvac
 from sqlalchemy import (
     Boolean,
     Column,
@@ -26,13 +27,27 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 # Connection
 # ---------------------------------------------------------------------------
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise RuntimeError(
-        "DATABASE_URL environment variable is not set. "
-        "Set it to a valid PostgreSQL connection string before starting the server."
-    )
+def _resolve_database_url() -> str:
+    vault_addr = os.getenv("VAULT_ADDR")
+    vault_token = os.getenv("VAULT_TOKEN")
+    if vault_addr and vault_token:
+        try:
+            client = hvac.Client(url=vault_addr, token=vault_token)
+            secret = client.secrets.kv.read_secret_version(path="database/prod")
+            url = secret["data"]["data"].get("url")
+            if url:
+                return url
+        except Exception:
+            pass
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        raise RuntimeError(
+            "Cannot resolve DATABASE_URL: Vault unreachable and DATABASE_URL env var not set."
+        )
+    return url
 
+
+DATABASE_URL = _resolve_database_url()
 engine = create_engine(DATABASE_URL)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
